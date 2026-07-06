@@ -17,7 +17,27 @@ class HarcamaKategorisi(str, Enum):
     DIGER = "diger"
 
 
+class IsKolu(str, Enum):
+    RESTORAN = "restoran"
+    MARKET = "market"
+    OTEL = "otel"
+    OFIS_TEDARIK = "ofis_tedarik"
+    TEKNOLOJI = "teknoloji"
+    DANISMANLIK_FIRMASI = "danismanlik_firmasi"
+    ULASIM_FIRMASI = "ulasim_firmasi"
+    ORGANIZASYON = "organizasyon"
 
+
+IS_KOLU_KATEGORILERI = {
+    IsKolu.RESTORAN: [HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
+    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA, HarcamaKategorisi.DIGER],
+    IsKolu.OTEL: [HarcamaKategorisi.KONAKLAMA, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
+    IsKolu.OFIS_TEDARIK: [HarcamaKategorisi.OFIS_SARF_MALZEME, HarcamaKategorisi.OFIS_DEMIRBAS],
+    IsKolu.TEKNOLOJI: [HarcamaKategorisi.YAZILIM_LISANS, HarcamaKategorisi.OFIS_DEMIRBAS],
+    IsKolu.DANISMANLIK_FIRMASI: [HarcamaKategorisi.DANISMANLIK],
+    IsKolu.ULASIM_FIRMASI: [HarcamaKategorisi.ULASIM],
+    IsKolu.ORGANIZASYON: [HarcamaKategorisi.EGLENCE, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
+}
 
 class FaturaKalemi(BaseModel):
     kalem_no: int

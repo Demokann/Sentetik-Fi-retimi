@@ -3,7 +3,7 @@ import random
 from decimal import Decimal
 from faker import Faker
 from datetime import date, timedelta
-from schema import HarcamaKategorisi, FaturaKalemi, Fatura
+from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu
 
 fake = Faker("tr_TR")
 
@@ -148,7 +148,7 @@ BIRIM_HAVUZU = {
     HarcamaKategorisi.EGLENCE: ["Adet", "Kişi"],
     HarcamaKategorisi.DIGER: ["Adet"],
 }
-
+"""
 SEKTOR_KELIME_HAVUZU = {
     HarcamaKategorisi.TEMEL_GIDA: ["Bereket", "Öz", "Tarim", "Gida Pazarlama", "Market"],
     HarcamaKategorisi.YEMEK_HIZMETI: ["Lezzet", "Sofra", "Mutfak", "Catering"],
@@ -161,6 +161,18 @@ SEKTOR_KELIME_HAVUZU = {
     HarcamaKategorisi.ALKOL: ["İçki Pazarlama", "Şarap Evi", "Meyhane"],
     HarcamaKategorisi.EGLENCE: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
     HarcamaKategorisi.DIGER: ["Ticaret", "Genel", "Pazarlama"],
+}
+"""
+
+IS_KOLU_SEKTOR_KELIME = {
+    IsKolu.RESTORAN: ["Sofra", "Lezzet", "Mutfak"],
+    IsKolu.MARKET: ["Market", "Gıda Pazarlama", "Tarım"],
+    IsKolu.OTEL: ["Grand", "Otel", "Resort"],
+    IsKolu.OFIS_TEDARIK: ["Kırtasiye", "Ofis Sarf", "Büro Malzemeleri"],
+    IsKolu.TEKNOLOJI: ["Yazılım", "Teknoloji", "Bilişim"],
+    IsKolu.DANISMANLIK_FIRMASI: ["Danışmanlık", "Consulting", "Denetim"],
+    IsKolu.ULASIM_FIRMASI: ["Lojistik", "Transfer", "Nakliyat"],
+    IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
 }
 
 SUFFIX_HAVUZU = ["Ltd. Şti.", "A.Ş.", "Tic. Ltd. Şti."]
@@ -192,8 +204,8 @@ def rastgele_vkn() -> str:
 
 
 
-def rastgele_firma_adi(kategori: HarcamaKategorisi) -> str:
-    sektor_kelime = random.choice(SEKTOR_KELIME_HAVUZU[kategori])
+def rastgele_firma_adi(is_kolu: IsKolu) -> str:
+    sektor_kelime = random.choice(IS_KOLU_SEKTOR_KELIME[is_kolu])
     ozel_isim = fake.last_name()  # Faker'dan sadece soyisim çekiyoruz, iş kolunu biz belirliyoruz
     suffix = random.choice(SUFFIX_HAVUZU)
     return f"{ozel_isim} {sektor_kelime} {suffix}"
@@ -261,17 +273,17 @@ def rastgele_miktar(birim: str) -> float:
     else:
         return round(random.uniform(0.5, 10), 2)
 
-def rastgele_kalem(kalem_no: int) -> FaturaKalemi:
-    kategori = rastgele_kategori()
-    birim = rastgele_birim(kategori)          # önce birim seçiliyor
+def rastgele_kalem(kalem_no: int, izinli_kategoriler: list[HarcamaKategorisi]) -> FaturaKalemi:
+    kategori = random.choice(izinli_kategoriler)
+    birim = rastgele_birim(kategori)
 
     return FaturaKalemi(
         kalem_no=kalem_no,
         aciklama=rastgele_aciklama(kategori),
         harcama_kategorisi=kategori,
-        miktar=rastgele_miktar(birim),  # miktar da birime bağlı olarak rastgele üretiliyor
+        miktar=rastgele_miktar(birim),
         birim=birim,
-        birim_fiyat=rastgele_birim_fiyat(kategori, birim),   # birim parametre olarak geçiyor
+        birim_fiyat=rastgele_birim_fiyat(kategori, birim),
         iskonto_orani=random.choices([0.0, 5.0, 10.0], weights=[70, 20, 10])[0],
         kdv_orani=kdv_orani_belirle(kategori),
     )
@@ -286,17 +298,13 @@ def rastgele_tarih(gun_araligi: int = 90) -> str:
 
 
 def rastgele_fatura() -> Fatura:
-    """Tam bir Fatura nesnesi üretir: header + kalemler."""
+    is_kolu = random.choice(list(IsKolu))
+    izinli_kategoriler = IS_KOLU_KATEGORILERI[is_kolu]
+
     kalem_sayisi = random.randint(1, 8)
+    kalemler = [rastgele_kalem(i + 1, izinli_kategoriler) for i in range(kalem_sayisi)]
 
-    # Faturadaki tüm kalemler ayni ana kategoriye ait olmak zorunda değil,
-    # her kalem bağimsiz kategoriye sahip olabilir (gerçek faturalar böyledir).
-    kalemler = [rastgele_kalem(kalem_no=i + 1) for i in range(kalem_sayisi)]
-
-    # Satici firma adini, faturadaki EN BASKIN kategoriye göre belirliyoruz
-    # (örn. çoğunlukla market kalemi varsa satici da market/gida firmasi olsun)
-    baskin_kategori = kalemler[0].harcama_kategorisi
-    satici_adi = rastgele_firma_adi(baskin_kategori)
+    satici_adi = rastgele_firma_adi(is_kolu)
 
     return Fatura(
         fatura_no=f"FTR{random.randint(100000, 999999)}",
@@ -304,7 +312,7 @@ def rastgele_fatura() -> Fatura:
         satici_vkn=rastgele_vkn(),
         satici_unvan=satici_adi,
         alici_vkn=rastgele_vkn(),
-        alici_unvan="SOA People", 
+        alici_unvan="SOA People",
         kalemler=kalemler,
     )
 
