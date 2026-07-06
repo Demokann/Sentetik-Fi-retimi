@@ -8,7 +8,8 @@ class HarcamaKategorisi(str, Enum):
     TEMEL_GIDA = "temel_gida"            # market, bakliyat, süt, et
     ULASIM = "ulasim"
     KONAKLAMA = "konaklama"
-    OFIS_MALZEME = "ofis_malzeme"
+    OFIS_SARF_MALZEME = "ofis_sarf_malzeme"   # kırtasiye, toner, kağıt
+    OFIS_DEMIRBAS = "ofis_demirbas"           # bilgisayar, yazıcı, masa, sandalye, klima
     YAZILIM_LISANS = "yazilim_lisans"
     DANISMANLIK = "danismanlik"
     ALKOL = "alkol"
