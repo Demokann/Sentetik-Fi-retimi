@@ -33,13 +33,13 @@ ACIKLAMA_HAVUZU = {
         "Gida Ürünleri",
         "Sebze ve Meyve",
     ],
-    HarcamaKategorisi.ULASIM: [
-        "Taksi Ücreti",
-        "Uçak Bileti",
-        "Otopark Ücreti",
-        "Yakit Gideri",
-        "Otobüs/Metro Karti Yükleme",
-        "Araç Kiralama",
+    HarcamaKategorisi.ULASIM_HIZMETI: [
+    "Nakliye Ücreti", "Kargo Hizmeti", "Taşımacılık Bedeli",
+    "Depolama Hizmeti", "Lojistik Hizmet Bedeli",
+    ],
+    HarcamaKategorisi.ULASIM_BIREYSEL: [
+        "Taksi Ücreti", "Uçak Bileti", "Otopark Ücreti",
+        "Yakıt Gideri", "Otobüs/Metro Kartı Yükleme", "Araç Kiralama",
     ],
     HarcamaKategorisi.KONAKLAMA: [
         "Otel Konaklama",
@@ -103,8 +103,8 @@ FIYAT_ARALIGI_DETAYLI = {
     (HarcamaKategorisi.TEMEL_GIDA, "Litre"): (20, 500), # Su/Sütten Zeytinyağina uzanan aralik
     (HarcamaKategorisi.TEMEL_GIDA, "Adet"): (20, 500),
 
-    (HarcamaKategorisi.ULASIM, "Km"): (25, 60), # Taksi km ücretleri baz alinarak
-    (HarcamaKategorisi.ULASIM, "Adet"): (30, 8000), # Toplu taşimadan uçak biletine
+    (HarcamaKategorisi.ULASIM_BIREYSEL, "Km"): (10, 50),
+    (HarcamaKategorisi.ULASIM_HIZMETI, "Km"): (50, 500),
 
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Adet"): (50, 500),
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Kutu"): (300, 2500),
@@ -123,7 +123,8 @@ FIYAT_ARALIGI_DETAYLI = {
 FIYAT_ARALIGI_GENEL = {
     HarcamaKategorisi.YEMEK_HIZMETI: (150, 2000),
     HarcamaKategorisi.TEMEL_GIDA: (20, 1000),
-    HarcamaKategorisi.ULASIM: (30, 8000),
+    HarcamaKategorisi.ULASIM_HIZMETI: (500, 20000),    # B2B nakliye/kargo genelde daha yüksek tutarlı
+    HarcamaKategorisi.ULASIM_BIREYSEL: (30, 3000),      # taksi/yakıt/otopark daha küçük tutarlı
     HarcamaKategorisi.KONAKLAMA: (1500, 15000),
     HarcamaKategorisi.OFIS_SARF_MALZEME: (50, 2500),   # kirtasiye + sarf paket birleşik fallback
     HarcamaKategorisi.OFIS_DEMIRBAS: (3000, 30000),
@@ -138,7 +139,8 @@ FIYAT_ARALIGI_GENEL = {
 BIRIM_HAVUZU = {
     HarcamaKategorisi.YEMEK_HIZMETI: ["Adet", "Kişi"],
     HarcamaKategorisi.TEMEL_GIDA: ["Kg", "Adet", "Litre"],
-    HarcamaKategorisi.ULASIM: ["Adet", "Km"],
+    HarcamaKategorisi.ULASIM_HIZMETI: ["Adet", "Km", "Kg"],
+    HarcamaKategorisi.ULASIM_BIREYSEL: ["Adet", "Km"],
     HarcamaKategorisi.KONAKLAMA: ["Gece", "Adet"],
     HarcamaKategorisi.OFIS_SARF_MALZEME: ["Adet", "Kutu"],
     HarcamaKategorisi.OFIS_DEMIRBAS: ["Adet"],
@@ -166,12 +168,13 @@ SEKTOR_KELIME_HAVUZU = {
 
 IS_KOLU_SEKTOR_KELIME = {
     IsKolu.RESTORAN: ["Sofra", "Lezzet", "Mutfak"],
-    IsKolu.MARKET: ["Market", "Gıda Pazarlama", "Tarım"],
+    IsKolu.MARKET: ["Market", "Gida Pazarlama", "Tarim"],
     IsKolu.OTEL: ["Grand", "Otel", "Resort"],
-    IsKolu.OFIS_TEDARIK: ["Kırtasiye", "Ofis Sarf", "Büro Malzemeleri"],
-    IsKolu.TEKNOLOJI: ["Yazılım", "Teknoloji", "Bilişim"],
-    IsKolu.DANISMANLIK_FIRMASI: ["Danışmanlık", "Consulting", "Denetim"],
-    IsKolu.ULASIM_FIRMASI: ["Lojistik", "Transfer", "Nakliyat"],
+    IsKolu.OFIS_TEDARIK: ["Kirtasiye", "Ofis Sarf", "Büro Malzemeleri"],
+    IsKolu.TEKNOLOJI: ["Yazilim", "Teknoloji", "Bilişim"],
+    IsKolu.DANISMANLIK_FIRMASI: ["Danişmanlik", "Consulting", "Denetim"],
+    IsKolu.LOJISTIK_FIRMASI: ["Lojistik", "Nakliyat", "Kargo"],
+    IsKolu.ULASIM_SAGLAYICI: ["Taksi", "Otogar", "Akaryakıt", "Rent A Car"],
     IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
 }
 
@@ -213,10 +216,9 @@ def rastgele_firma_adi(is_kolu: IsKolu) -> str:
 
 def rastgele_kategori() -> HarcamaKategorisi:
     kategoriler = list(HarcamaKategorisi)
-    # sira: YEMEK_HIZMETI, TEMEL_GIDA, ULASIM, KONAKLAMA, OFIS_SARF_MALZEME, OFIS_DEMIRBAS,
-    #       YAZILIM_LISANS, DANISMANLIK, ALKOL, EGLENCE, DIGER
-    agirliklar = [15, 15, 15, 8, 9, 3, 10, 8, 5, 5, 7]
-    #             YH  TG  UL  KO OS OD YL  DA AL EG DI
+    # Sıra: YEMEK_HIZMETI, TEMEL_GIDA, ULASIM_HIZMETI, ULASIM_BIREYSEL, KONAKLAMA,
+    #       OFIS_SARF_MALZEME, OFIS_DEMIRBAS, YAZILIM_LISANS, DANISMANLIK, ALKOL, EGLENCE, DIGER
+    agirliklar = [15, 15, 7, 8, 8, 9, 3, 10, 8, 5, 5, 7]
     return random.choices(kategoriler, weights=agirliklar, k=1)[0]
 
 
@@ -251,7 +253,8 @@ def rastgele_birim_fiyat(kategori: HarcamaKategorisi, birim: str) -> Decimal:
 KDV_ORANI_MAP = {
     HarcamaKategorisi.YEMEK_HIZMETI: 10.0,
     HarcamaKategorisi.TEMEL_GIDA: 1.0,
-    HarcamaKategorisi.ULASIM: 20.0,
+    HarcamaKategorisi.ULASIM_HIZMETI: 20.0,
+    HarcamaKategorisi.ULASIM_BIREYSEL: 20.0,
     HarcamaKategorisi.KONAKLAMA: 10.0,
     HarcamaKategorisi.OFIS_SARF_MALZEME: 20.0,
     HarcamaKategorisi.OFIS_DEMIRBAS: 20.0,

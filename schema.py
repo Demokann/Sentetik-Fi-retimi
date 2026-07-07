@@ -6,7 +6,8 @@ from enum import Enum
 class HarcamaKategorisi(str, Enum):
     YEMEK_HIZMETI = "yemek_hizmeti"      # restoran, catering, iş yemeği
     TEMEL_GIDA = "temel_gida"            # market, bakliyat, süt, et
-    ULASIM = "ulasim"
+    ULASIM_HIZMETI = "ulasim_hizmeti"      # B2B: nakliye, kargo, taşımacılık, depolama
+    ULASIM_BIREYSEL = "ulasim_bireysel"    # taksi, otobüs/metro, yakıt, araç kiralama
     KONAKLAMA = "konaklama"
     OFIS_SARF_MALZEME = "ofis_sarf_malzeme"   # kırtasiye, toner, kağıt
     OFIS_DEMIRBAS = "ofis_demirbas"           # bilgisayar, yazıcı, masa, sandalye, klima
@@ -24,7 +25,8 @@ class IsKolu(str, Enum):
     OFIS_TEDARIK = "ofis_tedarik"
     TEKNOLOJI = "teknoloji"
     DANISMANLIK_FIRMASI = "danismanlik_firmasi"
-    ULASIM_FIRMASI = "ulasim_firmasi"
+    LOJISTIK_FIRMASI = "lojistik_firmasi"       # eskiden ULASIM_FIRMASI ise adını netleştirdik
+    ULASIM_SAGLAYICI = "ulasim_saglayici"        # taksi durağı, akaryakıt istasyonu, rent-a-car
     ORGANIZASYON = "organizasyon"
 
 
@@ -35,7 +37,8 @@ IS_KOLU_KATEGORILERI = {
     IsKolu.OFIS_TEDARIK: [HarcamaKategorisi.OFIS_SARF_MALZEME, HarcamaKategorisi.OFIS_DEMIRBAS],
     IsKolu.TEKNOLOJI: [HarcamaKategorisi.YAZILIM_LISANS, HarcamaKategorisi.OFIS_DEMIRBAS],
     IsKolu.DANISMANLIK_FIRMASI: [HarcamaKategorisi.DANISMANLIK],
-    IsKolu.ULASIM_FIRMASI: [HarcamaKategorisi.ULASIM],
+    IsKolu.LOJISTIK_FIRMASI: [HarcamaKategorisi.ULASIM_HIZMETI],
+    IsKolu.ULASIM_SAGLAYICI: [HarcamaKategorisi.ULASIM_BIREYSEL],
     IsKolu.ORGANIZASYON: [HarcamaKategorisi.EGLENCE, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
 }
 
