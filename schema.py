@@ -42,6 +42,12 @@ IS_KOLU_KATEGORILERI = {
     IsKolu.ORGANIZASYON: [HarcamaKategorisi.EGLENCE, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
 }
 
+class FirmaTuru(str, Enum):
+    KISA_UNVAN = "kisa_unvan"
+    UZUN_UNVAN = "uzun_unvan"
+    SAHIS_SIRKETI = "sahis_sirketi"
+    YABANCI_ORTAKLI = "yabanci_ortakli"
+
 class FaturaKalemi(BaseModel):
     kalem_no: int
     aciklama: str
