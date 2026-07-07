@@ -34,12 +34,12 @@ ACIKLAMA_HAVUZU = {
         "Sebze ve Meyve",
     ],
     HarcamaKategorisi.ULASIM_HIZMETI: [
-    "Nakliye Ücreti", "Kargo Hizmeti", "Taşımacılık Bedeli",
+    "Nakliye Ücreti", "Kargo Hizmeti", "Taşimacilik Bedeli",
     "Depolama Hizmeti", "Lojistik Hizmet Bedeli",
     ],
     HarcamaKategorisi.ULASIM_BIREYSEL: [
         "Taksi Ücreti", "Uçak Bileti", "Otopark Ücreti",
-        "Yakıt Gideri", "Otobüs/Metro Kartı Yükleme", "Araç Kiralama",
+        "Yakit Gideri", "Otobüs/Metro Karti Yükleme", "Araç Kiralama",
     ],
     HarcamaKategorisi.KONAKLAMA: [
         "Otel Konaklama",
@@ -51,9 +51,13 @@ ACIKLAMA_HAVUZU = {
         "Kirtasiye Malzemesi", "Toner/Kartuş", "Yazici Kağidi",
         "Temizlik Malzemesi", "A4 Kağit Kolisi",
     ],
-    HarcamaKategorisi.OFIS_DEMIRBAS: [
-        "Ofis Masasi", "Ofis Sandalyesi", "Kahve Makinesi",
-        "Yazici/Tarayici", "Monitör",
+    HarcamaKategorisi.OFIS_MOBILYA: [
+    "Ofis Masası", "Ofis Sandalyesi", "Kahve Makinesi",
+    "Dolap", "Toplantı Masası",
+    ],
+    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: [
+        "Yazıcı/Tarayıcı", "Monitör", "Bilgisayar",
+        "Klavye/Mouse Seti", "Sunucu Ekipmanı",
     ],
     HarcamaKategorisi.YAZILIM_LISANS: [
         "Yazilim Lisans Bedeli",
@@ -84,6 +88,7 @@ ACIKLAMA_HAVUZU = {
         "Genel Gider",
         "Muhtelif Harcama",
         "Diğer Hizmet Bedeli",
+        "Diğer Market Ürünleri",
     ],
 }
 
@@ -108,14 +113,16 @@ FIYAT_ARALIGI_DETAYLI = {
 
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Adet"): (50, 500),
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Kutu"): (300, 2500),
-    (HarcamaKategorisi.OFIS_DEMIRBAS, "Adet"): (3000, 30000),
+    (HarcamaKategorisi.OFIS_MOBILYA, "Adet"): (2000, 20000),
+    (HarcamaKategorisi.TEKNOLOJI_EKIPMAN, "Adet"): (3000, 40000),   # bilgisayar/sunucu daha pahalı olabilir
+    
 
     (HarcamaKategorisi.DANISMANLIK, "Saat"): (1000, 5000),
     (HarcamaKategorisi.DANISMANLIK, "Ay"): (10000, 100000),
     (HarcamaKategorisi.DANISMANLIK, "Adet"): (2000, 50000),
 
     (HarcamaKategorisi.YAZILIM_LISANS, "Ay"): (300, 5000),
-    (HarcamaKategorisi.YAZILIM_LISANS, "Kullanıcı"): (1000, 25000),
+    (HarcamaKategorisi.YAZILIM_LISANS, "Kullanici"): (1000, 25000),
     (HarcamaKategorisi.YAZILIM_LISANS, "Adet"): (500, 15000),
 }
 
@@ -123,11 +130,12 @@ FIYAT_ARALIGI_DETAYLI = {
 FIYAT_ARALIGI_GENEL = {
     HarcamaKategorisi.YEMEK_HIZMETI: (150, 2000),
     HarcamaKategorisi.TEMEL_GIDA: (20, 1000),
-    HarcamaKategorisi.ULASIM_HIZMETI: (500, 20000),    # B2B nakliye/kargo genelde daha yüksek tutarlı
-    HarcamaKategorisi.ULASIM_BIREYSEL: (30, 3000),      # taksi/yakıt/otopark daha küçük tutarlı
+    HarcamaKategorisi.ULASIM_HIZMETI: (500, 20000),    # B2B nakliye/kargo genelde daha yüksek tutarli
+    HarcamaKategorisi.ULASIM_BIREYSEL: (30, 3000),      # taksi/yakit/otopark daha küçük tutarli
     HarcamaKategorisi.KONAKLAMA: (1500, 15000),
     HarcamaKategorisi.OFIS_SARF_MALZEME: (50, 2500),   # kirtasiye + sarf paket birleşik fallback
-    HarcamaKategorisi.OFIS_DEMIRBAS: (3000, 30000),
+    HarcamaKategorisi.OFIS_MOBILYA: (2000, 20000),        # masa/sandalye/kahve makinesi
+    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: (3000, 40000),    # bilgisayar/sunucu daha pahalı olabilir
     HarcamaKategorisi.YAZILIM_LISANS: (300, 25000),
     HarcamaKategorisi.DANISMANLIK: (2000, 100000),
     HarcamaKategorisi.ALKOL: (150, 4000),
@@ -143,8 +151,9 @@ BIRIM_HAVUZU = {
     HarcamaKategorisi.ULASIM_BIREYSEL: ["Adet", "Km"],
     HarcamaKategorisi.KONAKLAMA: ["Gece", "Adet"],
     HarcamaKategorisi.OFIS_SARF_MALZEME: ["Adet", "Kutu"],
-    HarcamaKategorisi.OFIS_DEMIRBAS: ["Adet"],
-    HarcamaKategorisi.YAZILIM_LISANS: ["Ay", "Kullanıcı", "Adet"],
+    HarcamaKategorisi.OFIS_MOBILYA: ["Adet"],
+    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: ["Adet"],
+    HarcamaKategorisi.YAZILIM_LISANS: ["Ay", "Kullanici", "Adet"],
     HarcamaKategorisi.DANISMANLIK: ["Saat", "Ay", "Adet"],
     HarcamaKategorisi.ALKOL: ["Adet", "Şişe"],
     HarcamaKategorisi.EGLENCE: ["Adet", "Kişi"],
@@ -174,25 +183,25 @@ IS_KOLU_SEKTOR_KELIME = {
     IsKolu.TEKNOLOJI: ["Yazilim", "Teknoloji", "Bilişim"],
     IsKolu.DANISMANLIK_FIRMASI: ["Danişmanlik", "Consulting", "Denetim"],
     IsKolu.LOJISTIK_FIRMASI: ["Lojistik", "Nakliyat", "Kargo"],
-    IsKolu.ULASIM_SAGLAYICI: ["Taksi", "Otogar", "Akaryakıt", "Rent A Car"],
+    IsKolu.ULASIM_SAGLAYICI: ["Taksi", "Otogar", "Akaryakit", "Rent A Car"],
     IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
 }
 """SUFFIX_HAVUZU = ["Ltd. Şti.", "A.Ş.", "Tic. Ltd. Şti."] """
 
 IS_KOLU_SUFFIX = {
-    IsKolu.RESTORAN: ["Gıda San. ve Tic. Ltd. Şti.", "Ltd. Şti."],
-    IsKolu.MARKET: ["Gıda Paz. Tic. Ltd. Şti.", "Tic. A.Ş."],
+    IsKolu.RESTORAN: ["Gida San. ve Tic. Ltd. Şti.", "Ltd. Şti."],
+    IsKolu.MARKET: ["Gida Paz. Tic. Ltd. Şti.", "Tic. A.Ş."],
     IsKolu.OTEL: ["Turizm A.Ş.", "Otelcilik Ltd. Şti."],
-    IsKolu.TEKNOLOJI: ["Yazılım A.Ş.", "Teknoloji Ltd. Şti."],
-    IsKolu.DANISMANLIK_FIRMASI: ["Danışmanlık A.Ş.", "Ltd. Şti."],
-    IsKolu.LOJISTIK_FIRMASI: ["Lojistik A.Ş.", "Nak. Tic. Ltd. Şti."],
+    IsKolu.TEKNOLOJI: ["A.Ş.", "Ltd. Şti."],
+    IsKolu.DANISMANLIK_FIRMASI: ["Danişmanlik A.Ş.", "Ltd. Şti."],
+    IsKolu.LOJISTIK_FIRMASI: ["A.Ş.", "Nak. Tic. Ltd. Şti."],
     IsKolu.ULASIM_SAGLAYICI: ["Ltd. Şti.", "Turizm Taş. Ltd. Şti."],
     IsKolu.OFIS_TEDARIK: ["Tic. Ltd. Şti.", "A.Ş."],
-    IsKolu.ORGANIZASYON: ["Organizasyon Ltd. Şti.", "Prodüksiyon A.Ş."],
+    IsKolu.ORGANIZASYON: ["Ltd. Şti.", "Prodüksiyon A.Ş."],
 }
 
-# Uzun unvan varyasyonları için ek kelime havuzu
-UZUN_UNVAN_EKLERI = ["Global", "İç ve Dış Ticaret", "Sanayi ve Ticaret"]
+# Uzun unvan varyasyonlari için ek kelime havuzu
+UZUN_UNVAN_EKLERI = ["Global", "İç ve Diş Ticaret", "Sanayi ve Ticaret"]
 
 FIRMA_TURU_AGIRLIK = {
     FirmaTuru.KISA_UNVAN: 55,
@@ -227,8 +236,8 @@ def rastgele_vkn() -> str:
 
 def rastgele_tckn() -> str:
     """
-    Gerçek TCKN algoritmasına uygun 11 haneli TC Kimlik No üretir.
-    İlk hane 0 olamaz. Son iki hane checksum'dır.
+    Gerçek TCKN algoritmasina uygun 11 haneli TC Kimlik No üretir.
+    İlk hane 0 olamaz. Son iki hane checksum'dir.
     """
     ilk_dokuz = [random.randint(1, 9)] + [random.randint(0, 9) for _ in range(8)]
 
@@ -243,7 +252,7 @@ def rastgele_tckn() -> str:
     return "".join(str(d) for d in ilk_on + [on_birinci_hane])
 
 def rastgele_firma_turu() -> FirmaTuru:
-    """Sadece firma türünü ağırlıklı olarak seçer."""
+    """Sadece firma türünü ağirlikli olarak seçer."""
     turler = list(FIRMA_TURU_AGIRLIK.keys())
     agirliklar = list(FIRMA_TURU_AGIRLIK.values())
     return random.choices(turler, weights=agirliklar, k=1)[0]
@@ -257,12 +266,12 @@ def rastgele_kimlik_no(firma_turu: FirmaTuru) -> str:
 
 
 def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
-    """Sadece firma adını üretir — iş kolu ve firma türüne göre şekillenir."""
+    """Sadece firma adini üretir — iş kolu ve firma türüne göre şekillenir."""
     sektor_kelime = random.choice(IS_KOLU_SEKTOR_KELIME[is_kolu])
     ozel_isim = fake.last_name()
 
     if firma_turu == FirmaTuru.SAHIS_SIRKETI:
-        return fake.name()   # şahıs şirketinde unvan = kişi adı
+        return fake.name()   # şahis şirketinde unvan = kişi adi
 
     suffix = random.choice(IS_KOLU_SUFFIX[is_kolu])
 
@@ -274,9 +283,9 @@ def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
         yabanci_kelime = fake.word().capitalize()
         return f"{ozel_isim} {yabanci_kelime} {sektor_kelime} {suffix}"
 
-    return f"{ozel_isim} {sektor_kelime} {suffix}"   # KISA_UNVAN (varsayılan)
+    return f"{ozel_isim} {sektor_kelime} {suffix}"   # KISA_UNVAN (varsayilan)
 
-# Alıcı (bizim şirketimiz) sabit kimlik bilgileri — her faturada aynı olmalı
+# Alici (bizim şirketimiz) sabit kimlik bilgileri — her faturada ayni olmali
 ALICI_VKN_SABIT = rastgele_vkn()
 ALICI_UNVAN_SABIT = "SOA People"
 
@@ -285,7 +294,7 @@ ALICI_UNVAN_SABIT = "SOA People"
 
 def rastgele_kategori() -> HarcamaKategorisi:
     kategoriler = list(HarcamaKategorisi)
-    # Sıra: YEMEK_HIZMETI, TEMEL_GIDA, ULASIM_HIZMETI, ULASIM_BIREYSEL, KONAKLAMA,
+    # Sira: YEMEK_HIZMETI, TEMEL_GIDA, ULASIM_HIZMETI, ULASIM_BIREYSEL, KONAKLAMA,
     #       OFIS_SARF_MALZEME, OFIS_DEMIRBAS, YAZILIM_LISANS, DANISMANLIK, ALKOL, EGLENCE, DIGER
     agirliklar = [15, 15, 7, 8, 8, 9, 3, 10, 8, 5, 5, 7]
     return random.choices(kategoriler, weights=agirliklar, k=1)[0]
@@ -326,7 +335,8 @@ KDV_ORANI_MAP = {
     HarcamaKategorisi.ULASIM_BIREYSEL: 20.0,
     HarcamaKategorisi.KONAKLAMA: 10.0,
     HarcamaKategorisi.OFIS_SARF_MALZEME: 20.0,
-    HarcamaKategorisi.OFIS_DEMIRBAS: 20.0,
+    HarcamaKategorisi.OFIS_MOBILYA: 20.0,
+    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: 20.0,
     HarcamaKategorisi.YAZILIM_LISANS: 20.0,
     HarcamaKategorisi.DANISMANLIK: 20.0,
     HarcamaKategorisi.ALKOL: 20.0,
@@ -352,14 +362,14 @@ def rastgele_kalem(
     kategori = random.choice(izinli_kategoriler)
     birim = rastgele_birim(kategori)
 
-    # Bu kategoride henüz kullanılmamış açıklamaları filtrele
+    # Bu kategoride henüz kullanilmamiş açiklamalari filtrele
     musait_aciklamalar = [
         a for a in ACIKLAMA_HAVUZU[kategori]
         if a not in kullanilan_aciklamalar
     ]
 
-    # Eğer kategorideki tüm açıklamalar tükendiyse (kalem sayısı havuzdan büyükse),
-    # tekrar kullanmak zorunda kalırız — havuzun tamamına geri düş
+    # Eğer kategorideki tüm açiklamalar tükendiyse (kalem sayisi havuzdan büyükse),
+    # tekrar kullanmak zorunda kaliriz — havuzun tamamina geri düş
     if not musait_aciklamalar:
         musait_aciklamalar = ACIKLAMA_HAVUZU[kategori]
 
@@ -390,11 +400,19 @@ def rastgele_fatura() -> Fatura:
     is_kolu = random.choice(list(IsKolu))
     izinli_kategoriler = IS_KOLU_KATEGORILERI[is_kolu]
 
-    firma_turu = rastgele_firma_turu()             # 1. adım: tür seç
-    satici_adi = rastgele_firma_adi(is_kolu, firma_turu)   # 2. adım: isim üret
-    satici_kimlik = rastgele_kimlik_no(firma_turu)          # 3. adım: kimlik no üret
+    firma_turu = rastgele_firma_turu()             # 1. adim: tür seç
+    satici_adi = rastgele_firma_adi(is_kolu, firma_turu)   # 2. adim: isim üret
+    satici_kimlik = rastgele_kimlik_no(firma_turu)    
+    
+    # Bu iş kolunda toplam kaç benzersiz açiklama üretilebilir?
+    toplam_musait_aciklama = sum(
+        len(ACIKLAMA_HAVUZU[kategori]) for kategori in izinli_kategoriler
+    )
 
-    kalem_sayisi = random.randint(1, 8)
+    # Kalem sayisi, mevcut çeşitliliği aşmasin (en fazla 8, ama havuz küçükse ona göre kisitla)
+    ust_sinir = min(8, toplam_musait_aciklama)
+    kalem_sayisi = random.randint(1, max(1, ust_sinir))      # 3. adim: kimlik no üret
+
     kullanilan_aciklamalar: set[str] = set()
     kalemler = [
         rastgele_kalem(i + 1, izinli_kategoriler, kullanilan_aciklamalar)

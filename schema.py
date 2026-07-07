@@ -10,7 +10,8 @@ class HarcamaKategorisi(str, Enum):
     ULASIM_BIREYSEL = "ulasim_bireysel"    # taksi, otobüs/metro, yakıt, araç kiralama
     KONAKLAMA = "konaklama"
     OFIS_SARF_MALZEME = "ofis_sarf_malzeme"   # kırtasiye, toner, kağıt
-    OFIS_DEMIRBAS = "ofis_demirbas"           # bilgisayar, yazıcı, masa, sandalye, klima
+    OFIS_MOBILYA = "ofis_mobilya"              # masa, sandalye, kahve makinesi
+    TEKNOLOJI_EKIPMAN = "teknoloji_ekipman"    # yazıcı, monitör, bilgisayar           # bilgisayar, yazıcı, masa, sandalye, klima
     YAZILIM_LISANS = "yazilim_lisans"
     DANISMANLIK = "danismanlik"
     ALKOL = "alkol"
@@ -32,10 +33,17 @@ class IsKolu(str, Enum):
 
 IS_KOLU_KATEGORILERI = {
     IsKolu.RESTORAN: [HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
-    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA, HarcamaKategorisi.DIGER],
     IsKolu.OTEL: [HarcamaKategorisi.KONAKLAMA, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
-    IsKolu.OFIS_TEDARIK: [HarcamaKategorisi.OFIS_SARF_MALZEME, HarcamaKategorisi.OFIS_DEMIRBAS],
-    IsKolu.TEKNOLOJI: [HarcamaKategorisi.YAZILIM_LISANS, HarcamaKategorisi.OFIS_DEMIRBAS],
+    IsKolu.OFIS_TEDARIK: [
+        HarcamaKategorisi.OFIS_SARF_MALZEME,
+        HarcamaKategorisi.OFIS_MOBILYA,
+        HarcamaKategorisi.TEKNOLOJI_EKIPMAN,
+    ],
+    IsKolu.TEKNOLOJI: [
+        HarcamaKategorisi.YAZILIM_LISANS,
+        HarcamaKategorisi.TEKNOLOJI_EKIPMAN,
+    ],
+    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA],   # <- tek tanım kaldı
     IsKolu.DANISMANLIK_FIRMASI: [HarcamaKategorisi.DANISMANLIK],
     IsKolu.LOJISTIK_FIRMASI: [HarcamaKategorisi.ULASIM_HIZMETI],
     IsKolu.ULASIM_SAGLAYICI: [HarcamaKategorisi.ULASIM_BIREYSEL],
