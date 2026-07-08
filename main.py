@@ -2,7 +2,7 @@ import argparse
 import json
 import csv
 from pathlib import Path
-
+from validators import dogrulama_raporu_olustur, raporu_yazdir
 from generators.field_generator import rastgele_fatura
 
 
@@ -34,7 +34,9 @@ def fatura_to_dict(fatura) -> dict:
         ],
     }
 
-
+#faturaların üretiminde artık fatura_to_dict fonksiyonu kullanılıyor, 
+#çünkü pydantic modelini JSON uyumlu dict'e çeviriyor ve hesaplanan alanları da ekliyor.
+#bu fonksiyon çağrılmıyor doğrulanmadan fatura üretimi gerekirse diye kalsın.
 def faturalari_uret(adet: int) -> list[dict]:
     """`adet` kadar rastgele fatura üretir ve dict listesine çevirir."""
     return [fatura_to_dict(rastgele_fatura()) for _ in range(adet)]
@@ -81,7 +83,14 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"{args.count} adet sentetik fatura üretiliyor...")
-    faturalar = faturalari_uret(args.count)
+
+    # Tek seferde üret, hem doğrulama hem export bu tek listeyi kullansın
+    fatura_nesneleri = [rastgele_fatura() for _ in range(args.count)]
+
+    rapor = dogrulama_raporu_olustur(fatura_nesneleri)
+    raporu_yazdir(rapor)
+
+    faturalar = [fatura_to_dict(f) for f in fatura_nesneleri]
 
     json_yolu = output_dir / f"{args.filename}.json"
     csv_yolu = output_dir / f"{args.filename}.csv"

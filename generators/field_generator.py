@@ -3,7 +3,7 @@ import random
 from decimal import Decimal
 from faker import Faker
 from datetime import date, timedelta
-from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu, FirmaTuru
+from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu, FirmaTuru, KDV_ORANI_MAP
 
 fake = Faker("tr_TR")
 
@@ -259,11 +259,9 @@ def rastgele_firma_turu() -> FirmaTuru:
 
 
 def rastgele_kimlik_no(firma_turu: FirmaTuru) -> str:
-    """Firma türüne göre VKN ya da TCKN üretir — sadece kimlik no sorumluluğu."""
     if firma_turu == FirmaTuru.SAHIS_SIRKETI:
         return rastgele_tckn()
     return rastgele_vkn()
-
 
 def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
     """Sadece firma adini üretir — iş kolu ve firma türüne göre şekillenir."""
@@ -328,21 +326,6 @@ def rastgele_birim_fiyat(kategori: HarcamaKategorisi, birim: str) -> Decimal:
     return Decimal(str(round(fiyat, 2)))
 
 
-KDV_ORANI_MAP = {
-    HarcamaKategorisi.YEMEK_HIZMETI: 10.0,
-    HarcamaKategorisi.TEMEL_GIDA: 1.0,
-    HarcamaKategorisi.ULASIM_HIZMETI: 20.0,
-    HarcamaKategorisi.ULASIM_BIREYSEL: 20.0,
-    HarcamaKategorisi.KONAKLAMA: 10.0,
-    HarcamaKategorisi.OFIS_SARF_MALZEME: 20.0,
-    HarcamaKategorisi.OFIS_MOBILYA: 20.0,
-    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: 20.0,
-    HarcamaKategorisi.YAZILIM_LISANS: 20.0,
-    HarcamaKategorisi.DANISMANLIK: 20.0,
-    HarcamaKategorisi.ALKOL: 20.0,
-    HarcamaKategorisi.EGLENCE: 20.0,
-    HarcamaKategorisi.DIGER: 20.0,
-}
 
 def kdv_orani_belirle(kategori: HarcamaKategorisi) -> float:
     return KDV_ORANI_MAP[kategori]
@@ -429,6 +412,12 @@ def rastgele_fatura() -> Fatura:
         kalemler=kalemler,
     )
 
+def kimlik_etiketi(kimlik_no: str) -> str:
+    """10 haneliyse VKN, 11 haneliyse TCKN etiketi döndürür."""
+    if len(kimlik_no) == 11:
+        return "TCKN"
+    return "VKN"
+
 if __name__ == "__main__":
     fatura = rastgele_fatura()
 
@@ -436,7 +425,8 @@ if __name__ == "__main__":
     print(f"  FATURA NO   : {fatura.fatura_no}")
     print(f"  TARİH       : {fatura.fatura_tarihi}")
     print(f"  SATICI      : {fatura.satici_unvan}")
-    print(f"  SATICI VKN  : {fatura.satici_vkn}")
+    etiket = kimlik_etiketi(fatura.satici_vkn)
+    print(f"  SATICI {etiket:<4} : {fatura.satici_vkn}")
     print(f"  ALICI       : {fatura.alici_unvan}")
     print(f"  ALICI VKN   : {fatura.alici_vkn}")
     print("=" * 60)

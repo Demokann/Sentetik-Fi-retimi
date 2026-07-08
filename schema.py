@@ -18,6 +18,21 @@ class HarcamaKategorisi(str, Enum):
     EGLENCE = "eglence"
     DIGER = "diger"
 
+KDV_ORANI_MAP = {
+    HarcamaKategorisi.YEMEK_HIZMETI: 10.0,
+    HarcamaKategorisi.TEMEL_GIDA: 1.0,
+    HarcamaKategorisi.ULASIM_HIZMETI: 20.0,
+    HarcamaKategorisi.ULASIM_BIREYSEL: 20.0,
+    HarcamaKategorisi.KONAKLAMA: 10.0,
+    HarcamaKategorisi.OFIS_SARF_MALZEME: 20.0,
+    HarcamaKategorisi.OFIS_MOBILYA: 20.0,
+    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: 20.0,
+    HarcamaKategorisi.YAZILIM_LISANS: 20.0,
+    HarcamaKategorisi.DANISMANLIK: 20.0,
+    HarcamaKategorisi.ALKOL: 20.0,
+    HarcamaKategorisi.EGLENCE: 20.0,
+    HarcamaKategorisi.DIGER: 20.0,
+}
 
 class IsKolu(str, Enum):
     RESTORAN = "restoran"
@@ -49,6 +64,7 @@ IS_KOLU_KATEGORILERI = {
     IsKolu.ULASIM_SAGLAYICI: [HarcamaKategorisi.ULASIM_BIREYSEL],
     IsKolu.ORGANIZASYON: [HarcamaKategorisi.EGLENCE, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
 }
+
 
 class FirmaTuru(str, Enum):
     KISA_UNVAN = "kisa_unvan"
