@@ -1,7 +1,12 @@
 from pydantic import BaseModel, field_validator
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import List
 from enum import Enum
+
+
+def paraya_yuvarla(deger: Decimal) -> Decimal:
+        """Herhangi bir Decimal değeri 2 ondalık basamağa (kuruş hassasiyeti) yuvarlar."""
+        return deger.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 class HarcamaKategorisi(str, Enum):
     YEMEK_HIZMETI = "yemek_hizmeti"      # restoran, catering, iş yemeği
@@ -72,6 +77,7 @@ class FirmaTuru(str, Enum):
     SAHIS_SIRKETI = "sahis_sirketi"
     YABANCI_ORTAKLI = "yabanci_ortakli"
 
+
 class FaturaKalemi(BaseModel):
     kalem_no: int
     aciklama: str
@@ -82,19 +88,23 @@ class FaturaKalemi(BaseModel):
     iskonto_orani: float = 0.0
     kdv_orani: float  # 1.0, 10.0, 20.0
 
+    
+
+    
+    
     @property
     def ara_toplam(self) -> Decimal:
         brut = Decimal(str(self.miktar)) * self.birim_fiyat
         iskonto = brut * Decimal(str(self.iskonto_orani)) / 100
-        return brut - iskonto
+        return paraya_yuvarla(brut - iskonto)
 
     @property
     def kdv_tutari(self) -> Decimal:
-        return self.ara_toplam * Decimal(str(self.kdv_orani)) / 100
+        return paraya_yuvarla(self.ara_toplam * Decimal(str(self.kdv_orani)) / 100)
 
     @property
     def satir_toplam(self) -> Decimal:
-        return self.ara_toplam + self.kdv_tutari
+        return paraya_yuvarla(self.ara_toplam + self.kdv_tutari)
 
 
 class Fatura(BaseModel):
@@ -108,4 +118,5 @@ class Fatura(BaseModel):
 
     @property
     def genel_toplam(self) -> Decimal:
-        return sum((k.satir_toplam for k in self.kalemler), Decimal("0"))
+        toplam = sum((k.satir_toplam for k in self.kalemler), Decimal("0"))
+        return paraya_yuvarla(toplam)
