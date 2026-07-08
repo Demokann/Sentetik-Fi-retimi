@@ -4,8 +4,11 @@ from decimal import Decimal
 from faker import Faker
 from datetime import date, timedelta
 from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu, FirmaTuru, KDV_ORANI_MAP
+import re
+from pathlib import Path
 
 fake = Faker("tr_TR")
+SOYISIM_SQL_DOSYASI = Path(__file__).parent.parent / "data" / "soyisimler.sql"
 
 
 # 2.1 — Kategoriye göre açiklama havuzu
@@ -213,6 +216,22 @@ FIRMA_TURU_AGIRLIK = {
 
 # 2.2 — Alan üretici fonksiyonlar
 
+def soyisimleri_yukle() -> list[str]:
+    """SQL dosyasındaki INSERT satırlarından soyisimleri regex ile çeker."""
+    with open(SOYISIM_SQL_DOSYASI, "r", encoding="utf-8") as f:
+        icerik = f.read()
+
+    # 'ABAT' gibi tek tırnak içindeki değerleri yakalar
+    bulunanlar = re.findall(r"VALUES\s*\('([^']+)'\)", icerik)
+    return bulunanlar
+
+
+TUM_SOYISIMLER = soyisimleri_yukle()   # modül yüklenince bir kere okunur
+
+
+def rastgele_soyisim() -> str:
+    return random.choice(TUM_SOYISIMLER)
+
 def rastgele_vkn() -> str:
     """
     Gerçek Türkiye VKN algoritmasina uygun 10 haneli vergi kimlik no üretir.
@@ -266,7 +285,7 @@ def rastgele_kimlik_no(firma_turu: FirmaTuru) -> str:
 def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
     """Sadece firma adini üretir — iş kolu ve firma türüne göre şekillenir."""
     sektor_kelime = random.choice(IS_KOLU_SEKTOR_KELIME[is_kolu])
-    ozel_isim = fake.last_name()
+    ozel_isim = rastgele_soyisim()   # değişti
 
     if firma_turu == FirmaTuru.SAHIS_SIRKETI:
         return fake.name()   # şahis şirketinde unvan = kişi adi
@@ -379,6 +398,16 @@ def rastgele_tarih(gun_araligi: int = 90) -> str:
     return tarih.isoformat()  # "2026-06-15" formatinda
 
 
+def rastgele_fatura_no(fatura_tarihi: str) -> str:
+    """
+    GİB e-fatura standardına uygun 16 haneli fatura no üretir:
+    3 harf (seri) + 4 haneli yıl + 9 haneli sıra no
+    """
+    yil = fatura_tarihi[:4]   # "2026-04-20" -> "2026", tarihle tutarlı olsun
+    sira_no = random.randint(1, 999999999)
+    return f"FTR{yil}{sira_no:09d}"   # 09d -> 9 haneye sıfırla tamamla
+
+
 def rastgele_fatura() -> Fatura:
     is_kolu = random.choice(list(IsKolu))
     izinli_kategoriler = IS_KOLU_KATEGORILERI[is_kolu]
@@ -386,6 +415,9 @@ def rastgele_fatura() -> Fatura:
     firma_turu = rastgele_firma_turu()             # 1. adim: tür seç
     satici_adi = rastgele_firma_adi(is_kolu, firma_turu)   # 2. adim: isim üret
     satici_kimlik = rastgele_kimlik_no(firma_turu)    
+
+    fatura_tarihi = rastgele_tarih()        
+    fatura_no = rastgele_fatura_no(fatura_tarihi)
     
     # Bu iş kolunda toplam kaç benzersiz açiklama üretilebilir?
     toplam_musait_aciklama = sum(
@@ -403,8 +435,8 @@ def rastgele_fatura() -> Fatura:
     ]
 
     return Fatura(
-        fatura_no=f"FTR{random.randint(100000, 999999)}",
-        fatura_tarihi=rastgele_tarih(),
+        fatura_no=fatura_no,
+        fatura_tarihi=fatura_tarihi,
         satici_vkn=satici_kimlik,
         satici_unvan=satici_adi,
         alici_vkn=ALICI_VKN_SABIT,

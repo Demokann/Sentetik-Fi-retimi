@@ -185,13 +185,32 @@ def raporu_yazdir(rapor: dict) -> None:
     if rapor["fatura_no_tekrarlari"]:
         print(f"\n  Tekrar eden no'lar: {rapor['fatura_no_tekrarlari']}")
 
+
+    vkn_firma = rapor.get("vkn_firma_tutarsizliklari", {})
+    ayni_vkn_farkli_ad = vkn_firma.get("ayni_vkn_farkli_ad", {})
+    ayni_ad_farkli_vkn = vkn_firma.get("ayni_ad_farkli_vkn", {})
+
+    print(f"\n  Aynı VKN/Farklı Ad Sayısı : {len(ayni_vkn_farkli_ad)}")
+    print(f"  Aynı Ad/Farklı VKN Sayısı : {len(ayni_ad_farkli_vkn)}")
+
+    if ayni_vkn_farkli_ad:
+        print("\n  ⚠️  Aynı VKN farklı firma adı ile eşleşmiş (daha sıkıntı)")
+        for vkn, adlar in list(ayni_vkn_farkli_ad.items())[:5]:
+            print(f"    VKN {vkn}: {adlar}")
+
+    if ayni_ad_farkli_vkn:
+        print("\n  Aynı firma adı farklı VKN ile üretilmiş (isim havuzu çakışması, düşük öncelikli):")
+        for ad, vknler in list(ayni_ad_farkli_vkn.items())[:5]:  #aynı ada sahip farklı vknleri yazdır, 5 ten fazlasını yazdırma.
+            print(f"    {ad}: {vknler}")
+   
+
     if rapor["hata_detaylari"]:
         print("\n  İlk 5 hatalı faturanın detayı:")
         for i, (indeks, detay) in enumerate(rapor["hata_detaylari"].items()):
             if i >= 5:
                 break
             print(f"\n    [{indeks}] Fatura No: {detay['fatura_no']}")
-            for hata in detay["hatalar"]:          # artık doğru listeye iniyoruz
+            for hata in detay["hatalar"]:
                 print(f"      - {hata}")
 
     print("=" * 60)
