@@ -178,6 +178,15 @@ SEKTOR_KELIME_HAVUZU = {
 }
 """
 
+NITELIK_KELIME_HAVUZU = [
+    "Modern", "Global", "Anadolu", "Ege", "Merkez", "Yıldız",
+    "Başkent", "Marmara", "Kardeş", "Öncü", "Doğa", "Vizyon",
+    "Akdeniz", "Karadeniz", "Toros", "Zirve", "Ufuk", "Bereket",
+    "Değer", "Fener", "Umut", "Barış", "Güven", "Sınır",
+    "Doruk", "Ata", "Yeni", "Batı", "Doğu", "Kuzey",
+]
+
+
 IS_KOLU_SEKTOR_KELIME = {
     IsKolu.RESTORAN: ["Sofra", "Lezzet", "Mutfak"],
     IsKolu.MARKET: ["Market", "Gida Pazarlama", "Tarim"],
@@ -283,24 +292,32 @@ def rastgele_kimlik_no(firma_turu: FirmaTuru) -> str:
     return rastgele_vkn()
 
 def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
-    """Sadece firma adini üretir — iş kolu ve firma türüne göre şekillenir."""
-    sektor_kelime = random.choice(IS_KOLU_SEKTOR_KELIME[is_kolu])
-    ozel_isim = rastgele_soyisim()   # değişti
-
     if firma_turu == FirmaTuru.SAHIS_SIRKETI:
-        return fake.name()   # şahis şirketinde unvan = kişi adi
+        return fake.name()
 
+    sektor_kelime = random.choice(IS_KOLU_SEKTOR_KELIME[is_kolu])
     suffix = random.choice(IS_KOLU_SUFFIX[is_kolu])
+    ozel_isim = rastgele_soyisim()
 
-    if firma_turu == FirmaTuru.UZUN_UNVAN:
-        ek = random.choice(UZUN_UNVAN_EKLERI)
-        return f"{ozel_isim} {ek} {sektor_kelime} {suffix}"
+    sablon = random.choices(
+        [
+            "isim_once",       # Yılmaz Gıda A.Ş.
+            "isim_yok",        # Anadolu Gıda A.Ş. (nitelik kelimesi sektörün yerini dolduruyor)
+            "isim_nitelikli",  # Yılmaz Anadolu Gıda A.Ş.
+        ],
+        weights=[40, 20, 40],
+        k=1,
+    )[0]
 
-    if firma_turu == FirmaTuru.YABANCI_ORTAKLI:
-        yabanci_kelime = fake.word().capitalize()
-        return f"{ozel_isim} {yabanci_kelime} {sektor_kelime} {suffix}"
+    if sablon == "isim_yok":
+        nitelik = random.choice(NITELIK_KELIME_HAVUZU)
+        return f"{nitelik} {sektor_kelime} {suffix}"
 
-    return f"{ozel_isim} {sektor_kelime} {suffix}"   # KISA_UNVAN (varsayilan)
+    if sablon == "isim_nitelikli":
+        nitelik = random.choice(NITELIK_KELIME_HAVUZU)
+        return f"{ozel_isim} {nitelik} {sektor_kelime} {suffix}"
+
+    return f"{ozel_isim} {sektor_kelime} {suffix}"   # isim_once (varsayılan)
 
 # Alici (bizim şirketimiz) sabit kimlik bilgileri — her faturada ayni olmali
 ALICI_VKN_SABIT = rastgele_vkn()

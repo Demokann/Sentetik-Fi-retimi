@@ -154,12 +154,17 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
 
     tekrar_eden_no = set(fatura_no_tekrarlarini_bul(faturalar))   # önce hesapla
     vkn_firma_hatalari = vkn_firma_tutarlilik_hatalarini_bul(faturalar)
+    ayni_vkn_farkli_ad = vkn_firma_hatalari["ayni_vkn_farkli_ad"] 
 
     fatura_hatalari: dict[int, dict] = {}   # artık indeks bazlı önceden fatura no key di tekrari halinde eski fatura nonun üstüne yazılacaktı, bu yüzden dict[int, dict] tipinde
     for i, fatura in enumerate(faturalar):
         hatalar = fatura_dogrula(fatura, bugun_str)
         if fatura.fatura_no in tekrar_eden_no:
             hatalar.append(f"Fatura no birden fazla kez kullanılmış: {fatura.fatura_no}")
+        
+        if fatura.satici_vkn in ayni_vkn_farkli_ad:   # sadece VKN çelişkisi geçersizlik sayılır
+            hatalar.append(f"Satıcı VKN'si farklı unvanlarla eşleşmiş: {fatura.satici_vkn}")
+            
         if hatalar:
             fatura_hatalari[i] = {"fatura_no": fatura.fatura_no, "hatalar": hatalar}
 
