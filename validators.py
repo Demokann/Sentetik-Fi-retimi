@@ -118,6 +118,10 @@ def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
         "ayni_ad_farkli_vkn": celiskili_ad,
     }
 
+def fatura_footer_tutarlilik_dogrula(fatura: Fatura) -> bool:
+    """toplam_vergisiz_tutar + toplam_kdv_tutari == genel_toplam mı?"""
+    beklenen = fatura.toplam_vergisiz_tutar + fatura.toplam_kdv_tutari
+    return abs(fatura.genel_toplam - beklenen) < Decimal("0.01")
 
 def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     """
@@ -135,6 +139,9 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     if tarih_gelecekte_mi(fatura.fatura_tarihi, bugun_str):
         hatalar.append(f"Gelecek tarihli fatura: {fatura.fatura_tarihi}")
 
+    if not fatura_footer_tutarlilik_dogrula(fatura):
+        hatalar.append("Footer toplamları (vergisiz + KDV) genel toplamla uyuşmuyor")
+
     if not fatura_genel_toplam_dogrula(fatura):
         hatalar.append("Genel toplam, kalemlerin toplamıyla uyuşmuyor")
 
@@ -147,6 +154,7 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
             hatalar.append(f"Kalem {kalem.kalem_no}: KDV oranı kategoriyle uyuşmuyor")
 
     return hatalar
+
 
 
 def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:

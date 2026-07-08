@@ -117,6 +117,28 @@ class Fatura(BaseModel):
     kalemler: List[FaturaKalemi]
 
     @property
+    def toplam_vergisiz_tutar(self) -> Decimal:
+        """Tüm kalemlerin KDV hariç (iskonto sonrası) toplamı."""
+        toplam = sum((k.ara_toplam for k in self.kalemler), Decimal("0"))
+        return paraya_yuvarla(toplam)
+
+    @property
+    def toplam_kdv_tutari(self) -> Decimal:
+        """Tüm kalemlerin KDV tutarlarının toplamı."""
+        toplam = sum((k.kdv_tutari for k in self.kalemler), Decimal("0"))
+        return paraya_yuvarla(toplam)
+
+    @property
+    def toplam_iskonto(self) -> Decimal:
+        """Tüm kalemlerdeki iskonto tutarlarının toplamı (brüt - ara_toplam farkı)."""
+        toplam = Decimal("0")
+        for k in self.kalemler:
+            brut = Decimal(str(k.miktar)) * k.birim_fiyat
+            iskonto_tutari = brut * Decimal(str(k.iskonto_orani)) / 100
+            toplam += iskonto_tutari
+        return paraya_yuvarla(toplam)
+
+    @property
     def genel_toplam(self) -> Decimal:
         toplam = sum((k.satir_toplam for k in self.kalemler), Decimal("0"))
         return paraya_yuvarla(toplam)

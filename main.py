@@ -15,6 +15,9 @@ def fatura_to_dict(fatura) -> dict:
         "satici_unvan": fatura.satici_unvan,
         "alici_vkn": fatura.alici_vkn,
         "alici_unvan": fatura.alici_unvan,
+        "toplam_vergisiz_tutar": float(fatura.toplam_vergisiz_tutar),   # yeni
+        "toplam_kdv_tutari": float(fatura.toplam_kdv_tutari),            # yeni
+        "toplam_iskonto": float(fatura.toplam_iskonto),                  # yeni
         "genel_toplam": float(fatura.genel_toplam),
         "kalemler": [
             {

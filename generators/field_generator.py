@@ -492,4 +492,7 @@ if __name__ == "__main__":
 
     print("\n" + "=" * 60)
     print(f"  GENEL TOPLAM: {fatura.genel_toplam:.2f} TL")
+    print(f"  VERGİSİZ TOPLAM: {fatura.toplam_vergisiz_tutar:.2f} TL")
+    print(f"  KDV TOPLAM: {fatura.toplam_kdv_tutari:.2f} TL")
+    print(f"  İSKONTO TOPLAM: {fatura.toplam_iskonto:.2f} TL")
     print("=" * 60)
