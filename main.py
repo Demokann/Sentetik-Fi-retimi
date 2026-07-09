@@ -7,7 +7,7 @@ from generators.field_generator import rastgele_fatura
 
 
 def fatura_to_dict(fatura) -> dict:
-    """Pydantic modelini JSON-uyumlu dict'e çevirir, hesaplanan alanları da ekler."""
+    """Pydantic modelini JSON-uyumlu dict'e çevirir, hesaplanan alanlari da ekler."""
     return {
         "fatura_no": fatura.fatura_no,
         "fatura_tarihi": fatura.fatura_tarihi,
@@ -37,9 +37,9 @@ def fatura_to_dict(fatura) -> dict:
         ],
     }
 
-#faturaların üretiminde artık fatura_to_dict fonksiyonu kullanılıyor, 
-#çünkü pydantic modelini JSON uyumlu dict'e çeviriyor ve hesaplanan alanları da ekliyor.
-#bu fonksiyon çağrılmıyor doğrulanmadan fatura üretimi gerekirse diye kalsın.
+#faturalarin üretiminde artik fatura_to_dict fonksiyonu kullaniliyor, 
+#çünkü pydantic modelini JSON uyumlu dict'e çeviriyor ve hesaplanan alanlari da ekliyor.
+#bu fonksiyon çağrilmiyor doğrulanmadan fatura üretimi gerekirse diye kalsin.
 def faturalari_uret(adet: int) -> list[dict]:
     """`adet` kadar rastgele fatura üretir ve dict listesine çevirir."""
     return [fatura_to_dict(rastgele_fatura()) for _ in range(adet)]
@@ -51,7 +51,7 @@ def json_olarak_kaydet(faturalar: list[dict], dosya_yolu: Path) -> None:
 
 
 def csv_olarak_kaydet(faturalar: list[dict], dosya_yolu: Path) -> None:
-    """Her kalemi bir satır olarak yazar; fatura bilgileri her satırda tekrarlanır."""
+    """Her kalemi bir satir olarak yazar; fatura bilgileri her satirda tekrarlanir."""
     satirlar = []
     for fatura in faturalar:
         for kalem in fatura["kalemler"]:
@@ -77,9 +77,9 @@ def csv_olarak_kaydet(faturalar: list[dict], dosya_yolu: Path) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Sentetik Türkçe fatura üretici")
-    parser.add_argument("--count", type=int, default=100, help="Üretilecek fatura sayısı")
-    parser.add_argument("--output-dir", type=str, default="data", help="Çıktı klasörü")
-    parser.add_argument("--filename", type=str, default="faturalar", help="Dosya adı (uzantısız)")
+    parser.add_argument("--count", type=int, default=100, help="Üretilecek fatura sayisi")
+    parser.add_argument("--output-dir", type=str, default="data", help="Çikti klasörü")
+    parser.add_argument("--filename", type=str, default="faturalar", help="Dosya adi (uzantisiz)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -87,7 +87,7 @@ def main():
 
     print(f"{args.count} adet sentetik fatura üretiliyor...")
 
-    # Tek seferde üret, hem doğrulama hem export bu tek listeyi kullansın
+    # Tek seferde üret, hem doğrulama hem export bu tek listeyi kullansin
     fatura_nesneleri = [rastgele_fatura() for _ in range(args.count)]
 
     rapor = dogrulama_raporu_olustur(fatura_nesneleri)
@@ -103,7 +103,7 @@ def main():
 
     toplam_kalem = sum(len(f["kalemler"]) for f in faturalar)
 
-    print(f"Tamamlandı:")
+    print(f"Tamamlandi:")
     print(f"  {len(faturalar)} fatura, {toplam_kalem} kalem üretildi")
     print(f"  JSON -> {json_yolu}")
     print(f"  CSV  -> {csv_yolu}")

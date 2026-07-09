@@ -55,12 +55,12 @@ ACIKLAMA_HAVUZU = {
         "Temizlik Malzemesi", "A4 Kağit Kolisi",
     ],
     HarcamaKategorisi.OFIS_MOBILYA: [
-    "Ofis Masası", "Ofis Sandalyesi", "Kahve Makinesi",
-    "Dolap", "Toplantı Masası",
+    "Ofis Masasi", "Ofis Sandalyesi", "Kahve Makinesi",
+    "Dolap", "Toplanti Masasi",
     ],
     HarcamaKategorisi.TEKNOLOJI_EKIPMAN: [
-        "Yazıcı/Tarayıcı", "Monitör", "Bilgisayar",
-        "Klavye/Mouse Seti", "Sunucu Ekipmanı",
+        "Yazici/Tarayici", "Monitör", "Bilgisayar",
+        "Klavye/Mouse Seti", "Sunucu Ekipmani",
     ],
     HarcamaKategorisi.YAZILIM_LISANS: [
         "Yazilim Lisans Bedeli",
@@ -86,6 +86,12 @@ ACIKLAMA_HAVUZU = {
         "Etkinlik Bileti",
         "Eğlence Hizmeti",
         "Sinema/Tiyatro Bileti",
+    ],
+    HarcamaKategorisi.TUTUN_URUNLERI: [
+        "Sigara", "Puro", "Elektronik Sigara", "Nargile Hizmeti",
+    ],
+    HarcamaKategorisi.KUMAR: [
+        "Piyango Bileti", "Bahis Ödemesi", "Casino Harcamasi",
     ],
     HarcamaKategorisi.DIGER: [
         "Genel Gider",
@@ -117,7 +123,7 @@ FIYAT_ARALIGI_DETAYLI = {
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Adet"): (50, 500),
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Kutu"): (300, 2500),
     (HarcamaKategorisi.OFIS_MOBILYA, "Adet"): (2000, 20000),
-    (HarcamaKategorisi.TEKNOLOJI_EKIPMAN, "Adet"): (3000, 40000),   # bilgisayar/sunucu daha pahalı olabilir
+    (HarcamaKategorisi.TEKNOLOJI_EKIPMAN, "Adet"): (3000, 40000),   # bilgisayar/sunucu daha pahali olabilir
     
 
     (HarcamaKategorisi.DANISMANLIK, "Saat"): (1000, 5000),
@@ -138,11 +144,13 @@ FIYAT_ARALIGI_GENEL = {
     HarcamaKategorisi.KONAKLAMA: (1500, 15000),
     HarcamaKategorisi.OFIS_SARF_MALZEME: (50, 2500),   # kirtasiye + sarf paket birleşik fallback
     HarcamaKategorisi.OFIS_MOBILYA: (2000, 20000),        # masa/sandalye/kahve makinesi
-    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: (3000, 40000),    # bilgisayar/sunucu daha pahalı olabilir
+    HarcamaKategorisi.TEKNOLOJI_EKIPMAN: (3000, 40000),    # bilgisayar/sunucu daha pahali olabilir
     HarcamaKategorisi.YAZILIM_LISANS: (300, 25000),
     HarcamaKategorisi.DANISMANLIK: (2000, 100000),
     HarcamaKategorisi.ALKOL: (150, 4000),
     HarcamaKategorisi.EGLENCE: (300, 15000),
+    HarcamaKategorisi.TUTUN_URUNLERI: (50, 500),
+    HarcamaKategorisi.KUMAR: (100, 5000),
     HarcamaKategorisi.DIGER: (100, 5000),
 }
 
@@ -160,6 +168,8 @@ BIRIM_HAVUZU = {
     HarcamaKategorisi.DANISMANLIK: ["Saat", "Ay", "Adet"],
     HarcamaKategorisi.ALKOL: ["Adet", "Şişe"],
     HarcamaKategorisi.EGLENCE: ["Adet", "Kişi"],
+    HarcamaKategorisi.TUTUN_URUNLERI: ["Adet", "Paket"],
+    HarcamaKategorisi.KUMAR: ["Adet"],
     HarcamaKategorisi.DIGER: ["Adet"],
 }
 """
@@ -179,11 +189,11 @@ SEKTOR_KELIME_HAVUZU = {
 """
 
 NITELIK_KELIME_HAVUZU = [
-    "Modern", "Global", "Anadolu", "Ege", "Merkez", "Yıldız",
+    "Modern", "Global", "Anadolu", "Ege", "Merkez", "Yildiz",
     "Başkent", "Marmara", "Kardeş", "Öncü", "Doğa", "Vizyon",
     "Akdeniz", "Karadeniz", "Toros", "Zirve", "Ufuk", "Bereket",
-    "Değer", "Fener", "Umut", "Barış", "Güven", "Sınır",
-    "Doruk", "Ata", "Yeni", "Batı", "Doğu", "Kuzey",
+    "Değer", "Fener", "Umut", "Bariş", "Güven", "Sinir",
+    "Doruk", "Ata", "Yeni", "Bati", "Doğu", "Kuzey",
 ]
 
 
@@ -226,11 +236,11 @@ FIRMA_TURU_AGIRLIK = {
 # 2.2 — Alan üretici fonksiyonlar
 
 def soyisimleri_yukle() -> list[str]:
-    """SQL dosyasındaki INSERT satırlarından soyisimleri regex ile çeker."""
+    """SQL dosyasindaki INSERT satirlarindan soyisimleri regex ile çeker."""
     with open(SOYISIM_SQL_DOSYASI, "r", encoding="utf-8") as f:
         icerik = f.read()
 
-    # 'ABAT' gibi tek tırnak içindeki değerleri yakalar
+    # 'ABAT' gibi tek tirnak içindeki değerleri yakalar
     bulunanlar = re.findall(r"VALUES\s*\('([^']+)'\)", icerik)
     return bulunanlar
 
@@ -301,9 +311,9 @@ def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
 
     sablon = random.choices(
         [
-            "isim_once",       # Yılmaz Gıda A.Ş.
-            "isim_yok",        # Anadolu Gıda A.Ş. (nitelik kelimesi sektörün yerini dolduruyor)
-            "isim_nitelikli",  # Yılmaz Anadolu Gıda A.Ş.
+            "isim_once",       # Yilmaz Gida A.Ş.
+            "isim_yok",        # Anadolu Gida A.Ş. (nitelik kelimesi sektörün yerini dolduruyor)
+            "isim_nitelikli",  # Yilmaz Anadolu Gida A.Ş.
         ],
         weights=[40, 20, 40],
         k=1,
@@ -317,7 +327,7 @@ def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
         nitelik = random.choice(NITELIK_KELIME_HAVUZU)
         return f"{ozel_isim} {nitelik} {sektor_kelime} {suffix}"
 
-    return f"{ozel_isim} {sektor_kelime} {suffix}"   # isim_once (varsayılan)
+    return f"{ozel_isim} {sektor_kelime} {suffix}"   # isim_once (varsayilan)
 
 # Alici (bizim şirketimiz) sabit kimlik bilgileri — her faturada ayni olmali
 ALICI_VKN_SABIT = rastgele_vkn()
@@ -330,7 +340,9 @@ def rastgele_kategori() -> HarcamaKategorisi:
     kategoriler = list(HarcamaKategorisi)
     # Sira: YEMEK_HIZMETI, TEMEL_GIDA, ULASIM_HIZMETI, ULASIM_BIREYSEL, KONAKLAMA,
     #       OFIS_SARF_MALZEME, OFIS_DEMIRBAS, YAZILIM_LISANS, DANISMANLIK, ALKOL, EGLENCE, DIGER
-    agirliklar = [15, 15, 7, 8, 8, 9, 3, 10, 8, 5, 5, 7]
+    agirliklar = [15, 15, 7, 8, 8, 9, 3, 10, 8, 5, 5, 7, 1 ,1] #sondaki 1, 1 sonradan eklelenen tütün ürünleri ve kumar için
+    # iskoluna dahil edilip normal fatura üretiminde hiç kullanilmayacaklar 
+    # yalnizca anomali kisminda dahil olacak ama liste uzunluğu enumerator ile eşleşmeli bundan dolayi eklendi
     return random.choices(kategoriler, weights=agirliklar, k=1)[0]
 
 
@@ -417,12 +429,12 @@ def rastgele_tarih(gun_araligi: int = 90) -> str:
 
 def rastgele_fatura_no(fatura_tarihi: str) -> str:
     """
-    GİB e-fatura standardına uygun 16 haneli fatura no üretir:
-    3 harf (seri) + 4 haneli yıl + 9 haneli sıra no
+    GİB e-fatura standardina uygun 16 haneli fatura no üretir:
+    3 harf (seri) + 4 haneli yil + 9 haneli sira no
     """
-    yil = fatura_tarihi[:4]   # "2026-04-20" -> "2026", tarihle tutarlı olsun
+    yil = fatura_tarihi[:4]   # "2026-04-20" -> "2026", tarihle tutarli olsun
     sira_no = random.randint(1, 999999999)
-    return f"FTR{yil}{sira_no:09d}"   # 09d -> 9 haneye sıfırla tamamla
+    return f"FTR{yil}{sira_no:09d}"   # 09d -> 9 haneye sifirla tamamla
 
 
 def rastgele_fatura() -> Fatura:

@@ -5,23 +5,40 @@ from enum import Enum
 
 
 def paraya_yuvarla(deger: Decimal) -> Decimal:
-        """Herhangi bir Decimal değeri 2 ondalık basamağa (kuruş hassasiyeti) yuvarlar."""
+        """Herhangi bir Decimal değeri 2 ondalik basamağa (kuruş hassasiyeti) yuvarlar."""
         return deger.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 class HarcamaKategorisi(str, Enum):
     YEMEK_HIZMETI = "yemek_hizmeti"      # restoran, catering, iş yemeği
     TEMEL_GIDA = "temel_gida"            # market, bakliyat, süt, et
-    ULASIM_HIZMETI = "ulasim_hizmeti"      # B2B: nakliye, kargo, taşımacılık, depolama
-    ULASIM_BIREYSEL = "ulasim_bireysel"    # taksi, otobüs/metro, yakıt, araç kiralama
+    ULASIM_HIZMETI = "ulasim_hizmeti"      # B2B: nakliye, kargo, taşimacilik, depolama
+    ULASIM_BIREYSEL = "ulasim_bireysel"    # taksi, otobüs/metro, yakit, araç kiralama
     KONAKLAMA = "konaklama"
-    OFIS_SARF_MALZEME = "ofis_sarf_malzeme"   # kırtasiye, toner, kağıt
+    OFIS_SARF_MALZEME = "ofis_sarf_malzeme"   # kirtasiye, toner, kağit
     OFIS_MOBILYA = "ofis_mobilya"              # masa, sandalye, kahve makinesi
-    TEKNOLOJI_EKIPMAN = "teknoloji_ekipman"    # yazıcı, monitör, bilgisayar           # bilgisayar, yazıcı, masa, sandalye, klima
+    TEKNOLOJI_EKIPMAN = "teknoloji_ekipman"    # yazici, monitör, bilgisayar           # bilgisayar, yazici, masa, sandalye, klima
     YAZILIM_LISANS = "yazilim_lisans"
     DANISMANLIK = "danismanlik"
     ALKOL = "alkol"
     EGLENCE = "eglence"
+    TUTUN_URUNLERI = "tutun_urunleri"      # yeni
+    KUMAR = "kumar"                          # yeni
     DIGER = "diger"
+
+# Genel geçer, şirketten bağimsiz yasakli kategoriler (kanunen kabul edilmeyen gider mantiği)
+POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
+    HarcamaKategorisi.ALKOL,
+    HarcamaKategorisi.EGLENCE,
+    HarcamaKategorisi.TUTUN_URUNLERI,
+    HarcamaKategorisi.KUMAR,
+}
+
+# Kategori bazli üst tutar limitleri (aşilirsa şüpheli sayilir)
+POLICY_TUTAR_LIMITLERI: dict[HarcamaKategorisi, float] = {
+    HarcamaKategorisi.YEMEK_HIZMETI: 1000,
+    HarcamaKategorisi.KONAKLAMA: 15000,
+    HarcamaKategorisi.ULASIM_BIREYSEL: 5000,
+}
 
 KDV_ORANI_MAP = {
     HarcamaKategorisi.YEMEK_HIZMETI: 10.0,
@@ -35,6 +52,8 @@ KDV_ORANI_MAP = {
     HarcamaKategorisi.YAZILIM_LISANS: 20.0,
     HarcamaKategorisi.DANISMANLIK: 20.0,
     HarcamaKategorisi.ALKOL: 20.0,
+    HarcamaKategorisi.TUTUN_URUNLERI: 20.0,
+    HarcamaKategorisi.KUMAR: 20.0,
     HarcamaKategorisi.EGLENCE: 20.0,
     HarcamaKategorisi.DIGER: 20.0,
 }
@@ -46,14 +65,14 @@ class IsKolu(str, Enum):
     OFIS_TEDARIK = "ofis_tedarik"
     TEKNOLOJI = "teknoloji"
     DANISMANLIK_FIRMASI = "danismanlik_firmasi"
-    LOJISTIK_FIRMASI = "lojistik_firmasi"       # eskiden ULASIM_FIRMASI ise adını netleştirdik
-    ULASIM_SAGLAYICI = "ulasim_saglayici"        # taksi durağı, akaryakıt istasyonu, rent-a-car
+    LOJISTIK_FIRMASI = "lojistik_firmasi"       # eskiden ULASIM_FIRMASI ise adini netleştirdik
+    ULASIM_SAGLAYICI = "ulasim_saglayici"        # taksi duraği, akaryakit istasyonu, rent-a-car
     ORGANIZASYON = "organizasyon"
 
 
 IS_KOLU_KATEGORILERI = {
-    IsKolu.RESTORAN: [HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
-    IsKolu.OTEL: [HarcamaKategorisi.KONAKLAMA, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
+    IsKolu.RESTORAN: [HarcamaKategorisi.YEMEK_HIZMETI],
+    IsKolu.OTEL: [HarcamaKategorisi.KONAKLAMA, HarcamaKategorisi.YEMEK_HIZMETI],
     IsKolu.OFIS_TEDARIK: [
         HarcamaKategorisi.OFIS_SARF_MALZEME,
         HarcamaKategorisi.OFIS_MOBILYA,
@@ -63,11 +82,11 @@ IS_KOLU_KATEGORILERI = {
         HarcamaKategorisi.YAZILIM_LISANS,
         HarcamaKategorisi.TEKNOLOJI_EKIPMAN,
     ],
-    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA],   # <- tek tanım kaldı
+    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA],   # <- tek tanim kaldi
     IsKolu.DANISMANLIK_FIRMASI: [HarcamaKategorisi.DANISMANLIK],
     IsKolu.LOJISTIK_FIRMASI: [HarcamaKategorisi.ULASIM_HIZMETI],
     IsKolu.ULASIM_SAGLAYICI: [HarcamaKategorisi.ULASIM_BIREYSEL],
-    IsKolu.ORGANIZASYON: [HarcamaKategorisi.EGLENCE, HarcamaKategorisi.YEMEK_HIZMETI, HarcamaKategorisi.ALKOL],
+    IsKolu.ORGANIZASYON: [HarcamaKategorisi.YEMEK_HIZMETI],
 }
 
 
@@ -118,19 +137,19 @@ class Fatura(BaseModel):
 
     @property
     def toplam_vergisiz_tutar(self) -> Decimal:
-        """Tüm kalemlerin KDV hariç (iskonto sonrası) toplamı."""
+        """Tüm kalemlerin KDV hariç (iskonto sonrasi) toplami."""
         toplam = sum((k.ara_toplam for k in self.kalemler), Decimal("0"))
         return paraya_yuvarla(toplam)
 
     @property
     def toplam_kdv_tutari(self) -> Decimal:
-        """Tüm kalemlerin KDV tutarlarının toplamı."""
+        """Tüm kalemlerin KDV tutarlarinin toplami."""
         toplam = sum((k.kdv_tutari for k in self.kalemler), Decimal("0"))
         return paraya_yuvarla(toplam)
 
     @property
     def toplam_iskonto(self) -> Decimal:
-        """Tüm kalemlerdeki iskonto tutarlarının toplamı (brüt - ara_toplam farkı)."""
+        """Tüm kalemlerdeki iskonto tutarlarinin toplami (brüt - ara_toplam farki)."""
         toplam = Decimal("0")
         for k in self.kalemler:
             brut = Decimal(str(k.miktar)) * k.birim_fiyat
@@ -142,3 +161,27 @@ class Fatura(BaseModel):
     def genel_toplam(self) -> Decimal:
         toplam = sum((k.satir_toplam for k in self.kalemler), Decimal("0"))
         return paraya_yuvarla(toplam)
+    
+class AnomaliliFaturaKalemi(FaturaKalemi):
+    """
+    FaturaKalemi'nin matematiksel anomali üretmek için kullanilan alt sinifi.
+    sahte_satir_toplam verilirse, satir_toplam property'si gerçek hesaplama
+    yerine bu sahte değeri döndürür.
+    """
+    sahte_satir_toplam: Decimal | None = None
+
+    @property
+    def satir_toplam(self) -> Decimal:
+        if self.sahte_satir_toplam is not None:
+            return self.sahte_satir_toplam
+        return super().satir_toplam
+    
+class AnomaliliFatura(Fatura):
+    """Fatura'nin genel_toplam'i kasitli olarak bozmak için kullanilan alt sinifi."""
+    sahte_genel_toplam: Decimal | None = None
+
+    @property
+    def genel_toplam(self) -> Decimal:
+        if self.sahte_genel_toplam is not None:
+            return self.sahte_genel_toplam
+        return super().genel_toplam

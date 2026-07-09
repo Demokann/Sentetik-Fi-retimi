@@ -6,10 +6,10 @@ from schema import Fatura, FaturaKalemi, HarcamaKategorisi,KDV_ORANI_MAP
 
 
 
-# 1. Kimlik No Doğrulaması (VKN / TCKN)
+# 1. Kimlik No Doğrulamasi (VKN / TCKN)
 
 def vkn_checksum_dogrula(vkn: str) -> bool:
-    """10 haneli VKN'nin checksum algoritmasına uygunluğunu doğrular."""
+    """10 haneli VKN'nin checksum algoritmasina uygunluğunu doğrular."""
     if len(vkn) != 10 or not vkn.isdigit():
         return False
 
@@ -28,7 +28,7 @@ def vkn_checksum_dogrula(vkn: str) -> bool:
 
 
 def tckn_checksum_dogrula(tckn: str) -> bool:
-    """11 haneli TCKN'nin checksum algoritmasına uygunluğunu doğrular."""
+    """11 haneli TCKN'nin checksum algoritmasina uygunluğunu doğrular."""
     if len(tckn) != 11 or not tckn.isdigit():
         return False
     if tckn[0] == "0":
@@ -45,7 +45,7 @@ def tckn_checksum_dogrula(tckn: str) -> bool:
 
 
 def kimlik_no_dogrula(kimlik_no: str) -> bool:
-    """Hane sayısına göre VKN ya da TCKN algoritmasını seçip doğrular."""
+    """Hane sayisina göre VKN ya da TCKN algoritmasini seçip doğrular."""
     if len(kimlik_no) == 10:
         return vkn_checksum_dogrula(kimlik_no)
     elif len(kimlik_no) == 11:
@@ -53,7 +53,7 @@ def kimlik_no_dogrula(kimlik_no: str) -> bool:
     return False
 
 
-# 2. Matematiksel Tutarlılık
+# 2. Matematiksel Tutarlilik
 
 def kalem_ara_toplam_dogrula(kalem: FaturaKalemi) -> bool:
     """ara_toplam = (miktar * birim_fiyat) * (1 - iskonto/100) doğru mu?"""
@@ -71,37 +71,37 @@ def kalem_satir_toplam_dogrula(kalem: FaturaKalemi) -> bool:
 
 
 def fatura_genel_toplam_dogrula(fatura: Fatura) -> bool:
-    """genel_toplam = tüm kalemlerin satir_toplam toplamı mı?"""
+    """genel_toplam = tüm kalemlerin satir_toplam toplami mi?"""
     beklenen = sum((k.satir_toplam for k in fatura.kalemler), Decimal("0"))
     return abs(fatura.genel_toplam - beklenen) < Decimal("0.01")
 
 
-#3. Fatura No Tekrar Kontrolü (Hepsi unique olmalı)
+#3. Fatura No Tekrar Kontrolü (Hepsi unique olmali)
 
 def fatura_no_tekrarlarini_bul(faturalar: list[Fatura]) -> list[str]:
-    """Birden fazla kez geçen fatura no'ları döndürür (boşsa hiç tekrar yok demektir)."""
+    """Birden fazla kez geçen fatura no'lari döndürür (boşsa hiç tekrar yok demektir)."""
     gorulen: dict[str, int] = {}
     for fatura in faturalar:
         gorulen[fatura.fatura_no] = gorulen.get(fatura.fatura_no, 0) + 1
     return [no for no, sayi in gorulen.items() if sayi > 1]
 
 
-#3. Tarih Kontrolü (Gelecek tarihli fatura olmamalı)
+#3. Tarih Kontrolü (Gelecek tarihli fatura olmamali)
 def tarih_gelecekte_mi(fatura_tarihi_str: str, bugun_str: str) -> bool:
     """Fatura tarihi bugünden ileri bir tarihse True döner (hata durumu)."""
-    return fatura_tarihi_str > bugun_str  # ISO format (YYYY-MM-DD) string karşılaştırması güvenlidir
+    return fatura_tarihi_str > bugun_str  # ISO format (YYYY-MM-DD) string karşilaştirmasi güvenlidir
 
 
-#4. KDV Oranı Kontrolü (Kategoriye göre sabit KDV oranı)
+#4. KDV Orani Kontrolü (Kategoriye göre sabit KDV orani)
 def kategori_kdv_dogrula(kalem: FaturaKalemi) -> bool:
-    """Kalemin KDV oranı, kategorisi için tanımlı sabit orana eşit mi?"""
+    """Kalemin KDV orani, kategorisi için tanimli sabit orana eşit mi?"""
     beklenen_kdv = KDV_ORANI_MAP.get(kalem.harcama_kategorisi)
     return beklenen_kdv is not None and kalem.kdv_orani == beklenen_kdv
 
 def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
     """
-    Aynı VKN'nin farklı firma adlarıyla, ya da aynı firma adının
-    farklı VKN'lerle eşleştiği durumları tespit eder.
+    Ayni VKN'nin farkli firma adlariyla, ya da ayni firma adinin
+    farkli VKN'lerle eşleştiği durumlari tespit eder.
     """
     vkn_to_adlar: dict[str, set[str]] = {}
     ad_to_vknler: dict[str, set[str]] = {}
@@ -119,39 +119,39 @@ def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
     }
 
 def fatura_footer_tutarlilik_dogrula(fatura: Fatura) -> bool:
-    """toplam_vergisiz_tutar + toplam_kdv_tutari == genel_toplam mı?"""
+    """toplam_vergisiz_tutar + toplam_kdv_tutari == genel_toplam mi?"""
     beklenen = fatura.toplam_vergisiz_tutar + fatura.toplam_kdv_tutari
     return abs(fatura.genel_toplam - beklenen) < Decimal("0.01")
 
 def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     """
-    Tek bir faturayı tüm kurallara göre kontrol eder.
-    Dönüş: ihlal edilen kuralların isim listesi (boşsa fatura tamamen geçerli demektir).
+    Tek bir faturayi tüm kurallara göre kontrol eder.
+    Dönüş: ihlal edilen kurallarin isim listesi (boşsa fatura tamamen geçerli demektir).
     """
     hatalar: list[str] = []
 
     if not kimlik_no_dogrula(fatura.satici_vkn):
-        hatalar.append(f"Geçersiz satıcı kimlik no: {fatura.satici_vkn}")
+        hatalar.append(f"Geçersiz satici kimlik no: {fatura.satici_vkn}")
 
     if not kimlik_no_dogrula(fatura.alici_vkn):
-        hatalar.append(f"Geçersiz alıcı kimlik no: {fatura.alici_vkn}")
+        hatalar.append(f"Geçersiz alici kimlik no: {fatura.alici_vkn}")
 
     if tarih_gelecekte_mi(fatura.fatura_tarihi, bugun_str):
         hatalar.append(f"Gelecek tarihli fatura: {fatura.fatura_tarihi}")
 
     if not fatura_footer_tutarlilik_dogrula(fatura):
-        hatalar.append("Footer toplamları (vergisiz + KDV) genel toplamla uyuşmuyor")
+        hatalar.append("Footer toplamlari (vergisiz + KDV) genel toplamla uyuşmuyor")
 
     if not fatura_genel_toplam_dogrula(fatura):
-        hatalar.append("Genel toplam, kalemlerin toplamıyla uyuşmuyor")
+        hatalar.append("Genel toplam, kalemlerin toplamiyla uyuşmuyor")
 
     for kalem in fatura.kalemler:
         if not kalem_ara_toplam_dogrula(kalem):
-            hatalar.append(f"Kalem {kalem.kalem_no}: ara_toplam hesabı hatalı")
+            hatalar.append(f"Kalem {kalem.kalem_no}: ara_toplam hesabi hatali")
         if not kalem_satir_toplam_dogrula(kalem):
-            hatalar.append(f"Kalem {kalem.kalem_no}: satir_toplam hesabı hatalı")
+            hatalar.append(f"Kalem {kalem.kalem_no}: satir_toplam hesabi hatali")
         if not kategori_kdv_dogrula(kalem):
-            hatalar.append(f"Kalem {kalem.kalem_no}: KDV oranı kategoriyle uyuşmuyor")
+            hatalar.append(f"Kalem {kalem.kalem_no}: KDV orani kategoriyle uyuşmuyor")
 
     return hatalar
 
@@ -165,17 +165,17 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
     ayni_vkn_farkli_ad = vkn_firma_hatalari["ayni_vkn_farkli_ad"]
     ayni_ad_farkli_vkn = vkn_firma_hatalari["ayni_ad_farkli_vkn"] 
 
-    fatura_hatalari: dict[int, dict] = {}   # artık indeks bazlı önceden fatura no key di tekrari halinde eski fatura nonun üstüne yazılacaktı, bu yüzden dict[int, dict] tipinde
+    fatura_hatalari: dict[int, dict] = {}   # artik indeks bazli önceden fatura no key di tekrari halinde eski fatura nonun üstüne yazilacakti, bu yüzden dict[int, dict] tipinde
     for i, fatura in enumerate(faturalar):
         hatalar = fatura_dogrula(fatura, bugun_str)
         if fatura.fatura_no in tekrar_eden_no:
-            hatalar.append(f"Fatura no birden fazla kez kullanılmış: {fatura.fatura_no}")
+            hatalar.append(f"Fatura no birden fazla kez kullanilmiş: {fatura.fatura_no}")
         
-        if fatura.satici_vkn in ayni_vkn_farkli_ad:   # sadece VKN çelişkisi geçersizlik sayılır
-            hatalar.append(f"Satıcı VKN'si farklı unvanlarla eşleşmiş: {fatura.satici_vkn}")
+        if fatura.satici_vkn in ayni_vkn_farkli_ad:   # sadece VKN çelişkisi geçersizlik sayilir
+            hatalar.append(f"Satici VKN'si farkli unvanlarla eşleşmiş: {fatura.satici_vkn}")
         
-        #if fatura.satici_unvan in ayni_ad_farkli_vkn:   # aynı ada sahip farklı vknler var, ama bu geçersizlik sayılmaz, uyarı olarak rapora eklenir
-        #    hatalar.append(f"Satıcı unvanı farklı VKN'lerle eşleşmiş: {fatura.satici_unvan}")
+        #if fatura.satici_unvan in ayni_ad_farkli_vkn:   # ayni ada sahip farkli vknler var, ama bu geçersizlik sayilmaz, uyari olarak rapora eklenir
+        #    hatalar.append(f"Satici unvani farkli VKN'lerle eşleşmiş: {fatura.satici_unvan}")
             
         if hatalar:
             fatura_hatalari[i] = {"fatura_no": fatura.fatura_no, "hatalar": hatalar}
@@ -196,7 +196,7 @@ def raporu_yazdir(rapor: dict) -> None:
     print("=" * 60)
     print(f"  Toplam Fatura       : {rapor['toplam_fatura']}")
     print(f"  Geçerli Fatura      : {rapor['gecerli_fatura_sayisi']}")
-    print(f"  Hatalı Fatura       : {rapor['hatali_fatura_sayisi']}")
+    print(f"  Hatali Fatura       : {rapor['hatali_fatura_sayisi']}")
     print(f"  Tekrar Eden Fatura No: {len(rapor['fatura_no_tekrarlari'])}")
 
     if rapor["fatura_no_tekrarlari"]:
@@ -207,22 +207,22 @@ def raporu_yazdir(rapor: dict) -> None:
     ayni_vkn_farkli_ad = vkn_firma.get("ayni_vkn_farkli_ad", {})
     ayni_ad_farkli_vkn = vkn_firma.get("ayni_ad_farkli_vkn", {})
 
-    print(f"\n  Aynı VKN/Farklı Ad Sayısı : {len(ayni_vkn_farkli_ad)}")
-    print(f"  Aynı Ad/Farklı VKN Sayısı : {len(ayni_ad_farkli_vkn)}")
+    print(f"\n  Ayni VKN/Farkli Ad Sayisi : {len(ayni_vkn_farkli_ad)}")
+    print(f"  Ayni Ad/Farkli VKN Sayisi : {len(ayni_ad_farkli_vkn)}")
 
     if ayni_vkn_farkli_ad:
-        print("\n  ⚠️  Aynı VKN farklı firma adı ile eşleşmiş (daha sıkıntı)")
+        print("\n  ⚠️  Ayni VKN farkli firma adi ile eşleşmiş (daha sikinti)")
         for vkn, adlar in list(ayni_vkn_farkli_ad.items())[:5]:
             print(f"    VKN {vkn}: {adlar}")
 
     if ayni_ad_farkli_vkn:
-        print("\n  Aynı firma adı farklı VKN ile üretilmiş (isim havuzu çakışması, düşük öncelikli):")
-        for ad, vknler in list(ayni_ad_farkli_vkn.items())[:5]:  #aynı ada sahip farklı vknleri yazdır, 5 ten fazlasını yazdırma.
+        print("\n  Ayni firma adi farkli VKN ile üretilmiş (isim havuzu çakişmasi, düşük öncelikli):")
+        for ad, vknler in list(ayni_ad_farkli_vkn.items())[:5]:  #ayni ada sahip farkli vknleri yazdir, 5 ten fazlasini yazdirma.
             print(f"    {ad}: {vknler}")
    
 
     if rapor["hata_detaylari"]:
-        print("\n  İlk 5 hatalı faturanın detayı:")
+        print("\n  İlk 5 hatali faturanin detayi:")
         for i, (indeks, detay) in enumerate(rapor["hata_detaylari"].items()):
             if i >= 5:
                 break
