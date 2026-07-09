@@ -1,7 +1,6 @@
 from decimal import Decimal
 from datetime import date
-from schema import Fatura, FaturaKalemi, HarcamaKategorisi,KDV_ORANI_MAP
-
+from schema import Fatura, FaturaKalemi, HarcamaKategorisi, KDV_ORANI_MAP, paraya_yuvarla
 
 
 
@@ -68,6 +67,11 @@ def kalem_satir_toplam_dogrula(kalem: FaturaKalemi) -> bool:
     """satir_toplam = ara_toplam + kdv_tutari doğru mu?"""
     beklenen = kalem.ara_toplam + kalem.kdv_tutari
     return abs(kalem.satir_toplam - beklenen) < Decimal("0.01")
+
+def kalem_kdv_tutari_dogrula(kalem: FaturaKalemi) -> bool:
+    """kdv_tutari = ara_toplam * kdv_orani/100 doğru mu?"""
+    beklenen = paraya_yuvarla(kalem.ara_toplam * Decimal(str(kalem.kdv_orani)) / Decimal("100"))
+    return abs(kalem.kdv_tutari - beklenen) < Decimal("0.01")
 
 
 def fatura_genel_toplam_dogrula(fatura: Fatura) -> bool:
@@ -148,6 +152,8 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     for kalem in fatura.kalemler:
         if not kalem_ara_toplam_dogrula(kalem):
             hatalar.append(f"Kalem {kalem.kalem_no}: ara_toplam hesabi hatali")
+        if not kalem_kdv_tutari_dogrula(kalem):
+            hatalar.append(f"Kalem {kalem.kalem_no}: kdv_tutari hesabi hatali")
         if not kalem_satir_toplam_dogrula(kalem):
             hatalar.append(f"Kalem {kalem.kalem_no}: satir_toplam hesabi hatali")
         if not kategori_kdv_dogrula(kalem):

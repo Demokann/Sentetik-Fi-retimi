@@ -165,10 +165,25 @@ class Fatura(BaseModel):
 class AnomaliliFaturaKalemi(FaturaKalemi):
     """
     FaturaKalemi'nin matematiksel anomali üretmek için kullanilan alt sinifi.
-    sahte_satir_toplam verilirse, satir_toplam property'si gerçek hesaplama
-    yerine bu sahte değeri döndürür.
+    sahte_satir_toplam verilirse, satir_toplam property'si; sahte_ara_toplam
+    verilirse ara_toplam property'si gerçek hesaplama yerine bu sahte
+    değerleri döndürür.
     """
     sahte_satir_toplam: Decimal | None = None
+    sahte_ara_toplam: Decimal | None = None
+    sahte_kdv_tutari: Decimal | None = None
+
+    @property
+    def ara_toplam(self) -> Decimal:
+        if self.sahte_ara_toplam is not None:
+            return self.sahte_ara_toplam
+        return super().ara_toplam
+    
+    @property
+    def kdv_tutari(self) -> Decimal:
+        if self.sahte_kdv_tutari is not None:
+            return self.sahte_kdv_tutari
+        return super().kdv_tutari
 
     @property
     def satir_toplam(self) -> Decimal:
@@ -177,8 +192,26 @@ class AnomaliliFaturaKalemi(FaturaKalemi):
         return super().satir_toplam
     
 class AnomaliliFatura(Fatura):
-    """Fatura'nin genel_toplam'i kasitli olarak bozmak için kullanilan alt sinifi."""
+    """
+    Fatura'nin genel_toplam'ini ya da footer kirilimlarindan
+    (toplam_vergisiz_tutar / toplam_kdv_tutari) birini kasitli olarak
+    bozmak için kullanilan alt sinifi.
+    """
     sahte_genel_toplam: Decimal | None = None
+    sahte_toplam_vergisiz_tutar: Decimal | None = None
+    sahte_toplam_kdv_tutari: Decimal | None = None
+
+    @property
+    def toplam_vergisiz_tutar(self) -> Decimal:
+        if self.sahte_toplam_vergisiz_tutar is not None:
+            return self.sahte_toplam_vergisiz_tutar
+        return super().toplam_vergisiz_tutar
+
+    @property
+    def toplam_kdv_tutari(self) -> Decimal:
+        if self.sahte_toplam_kdv_tutari is not None:
+            return self.sahte_toplam_kdv_tutari
+        return super().toplam_kdv_tutari
 
     @property
     def genel_toplam(self) -> Decimal:
