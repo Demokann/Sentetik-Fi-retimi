@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from decimal import ROUND_HALF_UP, Decimal
 from typing import List
 from enum import Enum
@@ -134,6 +134,8 @@ class Fatura(BaseModel):
     alici_vkn: str
     alici_unvan: str
     kalemler: List[FaturaKalemi]
+    is_anomali: bool = False  # anomali üretiminde kullanilacak flag, default False
+    anomali_tipi: list[str] = Field(default_factory=list)  # anomali üretiminde kullanilacak flag, default None
 
     @property
     def toplam_vergisiz_tutar(self) -> Decimal:

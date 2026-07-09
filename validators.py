@@ -83,11 +83,15 @@ def fatura_genel_toplam_dogrula(fatura: Fatura) -> bool:
 #3. Fatura No Tekrar Kontrolü (Hepsi unique olmali)
 
 def fatura_no_tekrarlarini_bul(faturalar: list[Fatura]) -> list[str]:
-    """Birden fazla kez geçen fatura no'lari döndürür (boşsa hiç tekrar yok demektir)."""
-    gorulen: dict[str, int] = {}
+    """
+    Ayni satici_vkn altinda birden fazla kez geçen fatura no'lari döndürür.
+    Farkli VKN'li firmalarin ayni fatura no'yu kullanmasi anomali sayilmaz.
+    """
+    gorulen: dict[tuple[str, str], int] = {}
     for fatura in faturalar:
-        gorulen[fatura.fatura_no] = gorulen.get(fatura.fatura_no, 0) + 1
-    return [no for no, sayi in gorulen.items() if sayi > 1]
+        anahtar = (fatura.satici_vkn, fatura.fatura_no)
+        gorulen[anahtar] = gorulen.get(anahtar, 0) + 1
+    return [no for (vkn, no), sayi in gorulen.items() if sayi > 1]
 
 
 #3. Tarih Kontrolü (Gelecek tarihli fatura olmamali)
@@ -166,7 +170,7 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
 def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
     bugun_str = date.today().isoformat()
 
-    tekrar_eden_no = set(fatura_no_tekrarlarini_bul(faturalar))   # önce hesapla
+    tekrar_eden_kayitlar = set(fatura_no_tekrarlarini_bul(faturalar))   # (vkn, no) çiftleri    
     vkn_firma_hatalari = vkn_firma_tutarlilik_hatalarini_bul(faturalar)
     ayni_vkn_farkli_ad = vkn_firma_hatalari["ayni_vkn_farkli_ad"]
     ayni_ad_farkli_vkn = vkn_firma_hatalari["ayni_ad_farkli_vkn"] 
@@ -174,14 +178,14 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
     fatura_hatalari: dict[int, dict] = {}   # artik indeks bazli önceden fatura no key di tekrari halinde eski fatura nonun üstüne yazilacakti, bu yüzden dict[int, dict] tipinde
     for i, fatura in enumerate(faturalar):
         hatalar = fatura_dogrula(fatura, bugun_str)
-        if fatura.fatura_no in tekrar_eden_no:
-            hatalar.append(f"Fatura no birden fazla kez kullanilmiş: {fatura.fatura_no}")
+        if (fatura.satici_vkn, fatura.fatura_no) in tekrar_eden_kayitlar:
+            hatalar.append(f"Fatura no birden fazla kez kullanilmiş (ayni VKN altinda): {fatura.fatura_no}")
         
         if fatura.satici_vkn in ayni_vkn_farkli_ad:   # sadece VKN çelişkisi geçersizlik sayilir
             hatalar.append(f"Satici VKN'si farkli unvanlarla eşleşmiş: {fatura.satici_vkn}")
         
-        #if fatura.satici_unvan in ayni_ad_farkli_vkn:   # ayni ada sahip farkli vknler var, ama bu geçersizlik sayilmaz, uyari olarak rapora eklenir
-        #    hatalar.append(f"Satici unvani farkli VKN'lerle eşleşmiş: {fatura.satici_unvan}")
+        if fatura.satici_unvan in ayni_ad_farkli_vkn:   # ayni ada sahip farkli vknler var, ama bu geçersizlik sayilmaz, uyari olarak rapora eklenir
+           hatalar.append(f"Satici unvani farkli VKN'lerle eşleşmiş: {fatura.satici_unvan}")
             
         if hatalar:
             fatura_hatalari[i] = {"fatura_no": fatura.fatura_no, "hatalar": hatalar}
@@ -190,7 +194,7 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
         "toplam_fatura": len(faturalar),
         "hatali_fatura_sayisi": len(fatura_hatalari),
         "gecerli_fatura_sayisi": len(faturalar) - len(fatura_hatalari),
-        "fatura_no_tekrarlari": list(tekrar_eden_no),
+        "fatura_no_tekrarlari": [f"{vkn}:{no}" for vkn, no in tekrar_eden_kayitlar],
         "vkn_firma_tutarsizliklari": vkn_firma_hatalari,
         "hata_detaylari": fatura_hatalari,
     }

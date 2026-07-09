@@ -118,7 +118,13 @@ def limit_asimi_anomali_uret(fatura: Fatura) -> Fatura:
 # 7. Fatura No Tekrari (İki Fatura Arasi — Farkli İmza, Ayri Kategori)
 
 def fatura_no_tekrari_anomali_uret(fatura: Fatura, diger_fatura_no: str) -> Fatura:
-    """Faturanin no'sunu, başka (var olan) bir faturanin no'suyla kasitli olarak çakiştirir."""
+    """
+    Faturanin no'sunu, başka (var olan) bir faturanin no'suyla kasitli
+    olarak çakiştirir. DİKKAT: Gerçek bir anomali üretmesi için bu
+    fonksiyon, ayni satici_vkn'e sahip iki fatura arasinda kullanilmali —
+    farkli VKN'li faturalarin ayni no'yu paylaşmasi artik anomali
+    sayilmiyor (validators.py, fatura_no_tekrarlarini_bul).
+    """
     fatura.fatura_no = diger_fatura_no
     return fatura
 
