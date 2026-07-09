@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 from validators import dogrulama_raporu_olustur, raporu_yazdir
 from generators.field_generator import rastgele_fatura
+from generators.anomaly_injector import karisik_veri_seti_uret
 
 
 def fatura_to_dict(fatura) -> dict:
@@ -36,6 +37,26 @@ def fatura_to_dict(fatura) -> dict:
             for k in fatura.kalemler
         ],
     }
+
+def etiket_to_dict(fatura) -> dict:
+    """
+    Modelin GÖRMEMESİ gereken ground-truth etiket bilgisini ayri bir
+    dict'e çevirir. fatura_to_dict()'ten kasitli olarak ayri tutulur —
+    veri sizintisini (data leakage) önlemek için etiketler modelin
+    girdisine hiç dahil edilmemeli, sadece değerlendirme/eğitim etiketi
+    olarak kullanilmali.
+    """
+    return {
+        "fatura_no": fatura.fatura_no,
+        "is_anomali": fatura.is_anomali,
+        "anomali_turleri": fatura.anomali_turleri,
+    }
+
+
+def etiketleri_kaydet(faturalar, dosya_yolu: Path) -> None:
+    etiketler = [etiket_to_dict(f) for f in faturalar]
+    with open(dosya_yolu, "w", encoding="utf-8") as f:
+        json.dump(etiketler, f, ensure_ascii=False, indent=2)
 
 #faturalarin üretiminde artik fatura_to_dict fonksiyonu kullaniliyor, 
 #çünkü pydantic modelini JSON uyumlu dict'e çeviriyor ve hesaplanan alanlari da ekliyor.
@@ -80,6 +101,7 @@ def main():
     parser.add_argument("--count", type=int, default=100, help="Üretilecek fatura sayisi")
     parser.add_argument("--output-dir", type=str, default="data", help="Çikti klasörü")
     parser.add_argument("--filename", type=str, default="faturalar", help="Dosya adi (uzantisiz)")
+    parser.add_argument("--anomali-orani", type=float, default=0.0, help="0.0-1.0 arasi, anomalili fatura orani")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -88,7 +110,7 @@ def main():
     print(f"{args.count} adet sentetik fatura üretiliyor...")
 
     # Tek seferde üret, hem doğrulama hem export bu tek listeyi kullansin
-    fatura_nesneleri = [rastgele_fatura() for _ in range(args.count)]
+    fatura_nesneleri = karisik_veri_seti_uret(args.count, args.anomali_orani)
 
     rapor = dogrulama_raporu_olustur(fatura_nesneleri)
     raporu_yazdir(rapor)
@@ -101,12 +123,16 @@ def main():
     json_olarak_kaydet(faturalar, json_yolu)
     csv_olarak_kaydet(faturalar, csv_yolu)
 
+    etiket_yolu = output_dir / f"{args.filename}_etiketler.json"
+    etiketleri_kaydet(fatura_nesneleri, etiket_yolu)
+
     toplam_kalem = sum(len(f["kalemler"]) for f in faturalar)
 
     print(f"Tamamlandi:")
     print(f"  {len(faturalar)} fatura, {toplam_kalem} kalem üretildi")
     print(f"  JSON -> {json_yolu}")
     print(f"  CSV  -> {csv_yolu}")
+    print(f"  Etiketler -> {etiket_yolu}")
 
 
 if __name__ == "__main__":

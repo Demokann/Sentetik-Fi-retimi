@@ -8,7 +8,7 @@ from schema import (
     POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
 )
 from generators.field_generator import (
-    ACIKLAMA_HAVUZU, rastgele_birim, rastgele_miktar, rastgele_birim_fiyat,
+    ACIKLAMA_HAVUZU, rastgele_birim, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura
 )
 
 
@@ -352,6 +352,76 @@ def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
     kalem.birim_fiyat = kalem.birim_fiyat * kayma_carpani
 
     return fatura
+
+ANOMALI_FONKSIYONLARI = {
+    "gelecek_tarihli": gelecek_tarihli_anomali_uret,
+    "gecersiz_kimlik_no": gecersiz_kimlik_no_anomali_uret,
+    "kdv_kategori_uyumsuzlugu": kdv_kategori_uyumsuzlugu_anomali_uret,
+    "is_kolu_kategori_uyumsuzlugu": is_kolu_kategori_uyumsuzlugu_anomali_uret,
+    "yasakli_kategori": yasakli_kategori_anomali_uret,
+    "limit_asimi": limit_asimi_anomali_uret,
+    "ara_toplam": ara_toplam_anomali_uret,
+    "kdv_tutari": kdv_tutari_anomali_uret,
+    "satir_toplami": satir_toplami_anomali_uret,
+    "sistematik_yuvarlama": sistematik_yuvarlama_anomali_uret,
+    "ondalik_kaymasi": ondalik_kaymasi_anomali_uret,
+    "genel_toplam": genel_toplam_anomali_uret,
+    "footer_kismi": footer_kismi_anomali_uret,
+    # fatura_no_tekrari burada YOK: iki fatura arasinda çalişiyor, ayri ele aliniyor
+}
+
+
+def fatura_no_tekrari_uygula(faturalar: list[Fatura]) -> None:
+    """
+    fatura_no_tekrari anomalisi, tek fatura yerine İKİ fatura arasinda
+    çalişir. Validator'in (fatura_no_tekrarlarini_bul) bunu gerçek bir
+    anomali sayabilmesi için iki faturanin satici_vkn'i AYNI olmali —
+    farkli VKN'li faturalarin ayni no'yu paylaşmasi artik anomali
+    sayilmiyor (bkz. validators.py). Bu yüzden ikinci faturanin VKN'si
+    kasitli olarak birinciyle eşitleniyor, sonra no çakiştiriliyor.
+    Liste yerinde (in-place) değiştirilir, dönüş değeri yok.
+    """
+    if len(faturalar) < 2:
+        return
+
+    idx1, idx2 = random.sample(range(len(faturalar)), 2)
+    f1, f2 = faturalar[idx1], faturalar[idx2]
+
+    f2.satici_vkn = f1.satici_vkn  # anomalinin gerçek sayilmasi için şart!
+    faturalar[idx2] = fatura_no_tekrari_anomali_uret(f2, f1.fatura_no)
+    faturalar[idx2].is_anomali = True
+    faturalar[idx2].anomali_turleri = faturalar[idx2].anomali_turleri + ["fatura_no_tekrari"]
+
+
+def karisik_veri_seti_uret(adet: int, anomali_orani: float = 0.2) -> list[Fatura]:
+    """
+    `adet` kadar fatura üretir, bunlarin `anomali_orani` kadarina rastgele
+    bir anomali uygulayip etiketler (is_anomali, anomali_turleri). Etiket
+    bilgisi sadece Pydantic modelinde tutulur; JSON export'a (fatura_to_dict)
+    dahil edilmez — model bu alanlari GÖRMEMELİ, sadece değerlendirme
+    (ground truth) amaçli kullanilmali.
+    """
+    faturalar = [rastgele_fatura() for _ in range(adet)]
+
+    anomali_sayisi = int(adet * anomali_orani)
+    anomalili_indexler = random.sample(range(adet), min(anomali_sayisi, adet))
+
+    fonksiyon_havuzu = list(ANOMALI_FONKSIYONLARI.items())
+
+    for idx in anomalili_indexler:
+        isim, fonksiyon = random.choice(fonksiyon_havuzu)
+        fatura = fonksiyon(faturalar[idx])
+        fatura.is_anomali = True
+        fatura.anomali_turleri = fatura.anomali_turleri + [isim]
+        faturalar[idx] = fatura
+
+    fatura_no_tekrar_oranı = 0.02  # tüm faturalarin %5'inde fatura_no_tekrari anomalisi
+
+    # fatura_no_tekrari havuzda olmadigi için ayrica, düşük bir olasilikla uygula
+    if anomali_orani > 0 and random.random() < fatura_no_tekrar_oranı:
+        fatura_no_tekrari_uygula(faturalar)
+
+    return faturalar
 
 if __name__ == "__main__":
     from generators.field_generator import rastgele_fatura

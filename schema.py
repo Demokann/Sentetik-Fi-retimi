@@ -134,8 +134,8 @@ class Fatura(BaseModel):
     alici_vkn: str
     alici_unvan: str
     kalemler: List[FaturaKalemi]
-    is_anomali: bool = False  # anomali üretiminde kullanilacak flag, default False
-    anomali_tipi: list[str] = Field(default_factory=list)  # anomali üretiminde kullanilacak flag, default None
+    is_anomali: bool = False
+    anomali_turleri: List[str] = Field(default_factory=list)
 
     @property
     def toplam_vergisiz_tutar(self) -> Decimal:
