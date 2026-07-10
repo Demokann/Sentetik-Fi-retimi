@@ -21,9 +21,10 @@ class HarcamaKategorisi(str, Enum):
     DANISMANLIK = "danismanlik"
     ALKOL = "alkol"
     EGLENCE = "eglence"
-    TUTUN_URUNLERI = "tutun_urunleri"      # yeni
-    KUMAR = "kumar"                          # yeni
-    DIGER = "diger"
+    TUTUN_URUNLERI = "tutun_urunleri"   # yeni
+    KUMAR = "kumar"                     # yeni
+    DIGER = "diger"                     # ölü kod
+    GIYIM = "giyim"                     # yeni
 
 # Genel geçer, şirketten bağimsiz yasakli kategoriler (kanunen kabul edilmeyen gider mantiği)
 POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
@@ -56,6 +57,7 @@ KDV_ORANI_MAP = {
     HarcamaKategorisi.KUMAR: 20.0,
     HarcamaKategorisi.EGLENCE: 20.0,
     HarcamaKategorisi.DIGER: 20.0,
+    HarcamaKategorisi.GIYIM: 10.0,   # yeni — tekstil/hazır giyim indirimli KDV
 }
 
 class IsKolu(str, Enum):
@@ -68,6 +70,7 @@ class IsKolu(str, Enum):
     LOJISTIK_FIRMASI = "lojistik_firmasi"       # eskiden ULASIM_FIRMASI ise adini netleştirdik
     ULASIM_SAGLAYICI = "ulasim_saglayici"        # taksi duraği, akaryakit istasyonu, rent-a-car
     ORGANIZASYON = "organizasyon"
+    GIYIM_MAGAZASI = "giyim_magazasi"   # yeni
 
 
 IS_KOLU_KATEGORILERI = {
@@ -87,6 +90,8 @@ IS_KOLU_KATEGORILERI = {
     IsKolu.LOJISTIK_FIRMASI: [HarcamaKategorisi.ULASIM_HIZMETI],
     IsKolu.ULASIM_SAGLAYICI: [HarcamaKategorisi.ULASIM_BIREYSEL],
     IsKolu.ORGANIZASYON: [HarcamaKategorisi.YEMEK_HIZMETI],
+    IsKolu.ORGANIZASYON: [HarcamaKategorisi.YEMEK_HIZMETI],
+    IsKolu.GIYIM_MAGAZASI: [HarcamaKategorisi.GIYIM],   # yeni
 }
 
 
@@ -135,7 +140,7 @@ class Fatura(BaseModel):
     alici_unvan: str
     kalemler: List[FaturaKalemi]
     is_anomali: bool = False
-    anomali_turleri: List[str] = Field(default_factory=list)
+    anomali_turleri: List[str] = Field(default_factory=list) 
 
     @property
     def toplam_vergisiz_tutar(self) -> Decimal:

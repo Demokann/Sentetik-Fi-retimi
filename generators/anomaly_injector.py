@@ -334,7 +334,7 @@ def sistematik_yuvarlama_anomali_uret(fatura: Fatura) -> Fatura:
     return fatura
 
 
-def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
+def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:  #Tespiti ile ilgili validator.py'de ayrıca bir iş kuralı yazılmalı
     """
     Veri girişi hatasi (fat-finger) simülasyonu: rastgele bir kalemin
     birim_fiyat'ini GERÇEKTEN 10x ya da 100x kaydirir. Bu, sahte_* alanlari
