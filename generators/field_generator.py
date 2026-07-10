@@ -489,6 +489,7 @@ def rastgele_kalem(
     kategori = random.choice(izinli_kategoriler)
     birim = rastgele_birim(kategori)
 
+
 # Büyük havuzlarda (CSV kaynaklı, binlerce eleman) tekrar filtresi hem
     # gereksiz maliyetli hem de anlamsız (çakışma ihtimali zaten ~0),
     # o yüzden sadece küçük (elle yazılmış) havuzlarda filtreleme yapılır.
