@@ -2,5 +2,19 @@ venv/
 __pycache__/
 *.pyc
 .env
-/data
+
+
+# data içindeki her şeyi ignore et
+data/*
+
+# belirli klasörleri dahil et
+!data/urun_verileri/
+!data/hizmet_verileri/
+!data/anomali_verileri/
+
+# bu klasörlerin içindeki dosyaları dahil et
+!data/urun_verileri/*.csv
+!data/hizmet_verileri/*.csv
+!data/anomali_verileri/*.csv
+
 /UBLTR_1.2.1_Paketi

@@ -1,0 +1,165 @@
+kategori,urun_adi
+corbalar,Düğün Çorbası
+corbalar,Bamya Çorbası
+corbalar,Mantar Çorbası
+corbalar,Sebze Çorbası
+corbalar,Balık Çorbası
+corbalar,Tavuk Çorbası
+corbalar,Krema Mantar Çorbası
+corbalar,Arabaşı Çorbası
+corbalar,Yoğurt Çorbası
+corbalar,Toyga Çorbası
+corbalar,Şehriye Çorbası
+corbalar,Köz Domates Çorbası
+corbalar,Ispanak Çorbası
+corbalar,Kabak Çorbası
+corbalar,Nohut Çorbası
+ana_yemekler_et,Dana Bonfile
+ana_yemekler_et,Dana Lokum
+ana_yemekler_et,Dana Şiş
+ana_yemekler_et,Dana Kaburga
+ana_yemekler_et,Kuzu Tandır
+ana_yemekler_et,Tandır Kebabı
+ana_yemekler_et,Tas Kebabı
+ana_yemekler_et,Hünkar Beğendi
+ana_yemekler_et,Orman Kebabı
+ana_yemekler_et,Etli Güveç
+ana_yemekler_et,Kiremitte Köfte
+ana_yemekler_et,İnegöl Köfte
+ana_yemekler_et,Tekirdağ Köfte
+ana_yemekler_et,Pideli Köfte
+ana_yemekler_et,Dalyan Köfte
+ana_yemekler_et,Kasap Köfte
+ana_yemekler_et,Çiftlik Köfte
+ana_yemekler_et,Dana Kavurma
+ana_yemekler_et,Fırın Kebabı
+ana_yemekler_et,Yoğurtlu Kebap
+ana_yemekler_et,Tepsi Kebabı
+ana_yemekler_et,Kağıt Kebabı
+ana_yemekler_et,Çoban Kavurma
+ana_yemekler_et,Dana Biftek
+ana_yemekler_et,Etli Pilav
+
+ana_yemekler_tavuk,Tavuk Pirzola
+ana_yemekler_tavuk,Tavuk Kanat
+ana_yemekler_tavuk,Tavuk Bonfile Izgara
+ana_yemekler_tavuk,Tavuk Külbastı
+ana_yemekler_tavuk,Tavuk Fajita
+ana_yemekler_tavuk,Tavuk Güveç
+ana_yemekler_tavuk,Tereyağlı Tavuk
+ana_yemekler_tavuk,Mantar Soslu Tavuk
+ana_yemekler_tavuk,Barbekü Soslu Tavuk
+ana_yemekler_tavuk,Acılı Tavuk
+ana_yemekler_tavuk,Tavuk Wrap
+ana_yemekler_tavuk,Tavuk Dürüm
+ana_yemekler_tavuk,Tavuk Tantuni
+ana_yemekler_tavuk,Piliç Izgara
+ana_yemekler_tavuk,Kremalı Tavuk
+hamur_isleri,Kuşbaşı Kaşarlı Pide
+hamur_isleri,Kavurmalı Pide
+hamur_isleri,Pastırmalı Pide
+hamur_isleri,Ispanaklı Pide
+hamur_isleri,Karadeniz Pidesi
+hamur_isleri,Kapalı Pide
+hamur_isleri,Vejetaryen Pizza
+hamur_isleri,Dört Peynirli Pizza
+hamur_isleri,Ton Balıklı Pizza
+hamur_isleri,Tavuklu Pizza
+hamur_isleri,Mantarlı Pizza
+hamur_isleri,Sucuklu Pizza
+hamur_isleri,Karışık Lahmacun
+hamur_isleri,Kaşarlı Lahmacun
+hamur_isleri,Peynirli Gözleme
+hamur_isleri,Kıymalı Gözleme
+hamur_isleri,Ispanaklı Gözleme
+hamur_isleri,Kaşarlı Gözleme
+hamur_isleri,Patatesli Gözleme
+hamur_isleri,Sucuklu Gözleme
+fast_food,Islak Hamburger
+fast_food,Mini Burger
+fast_food,Et Burger
+fast_food,Mega Burger
+fast_food,Tavuk Nugget
+fast_food,Soğan Halkası
+fast_food,Patates Kova
+fast_food,Çıtır Patates
+fast_food,Hot Dog
+fast_food,Karışık Tost
+fast_food,Kavurmalı Tost
+fast_food,Bazlama Tost
+fast_food,Tavuk Sandviç
+fast_food,Et Sandviç
+fast_food,Döner Sandviç
+fast_food,Lavaş Tavuk
+fast_food,Lavaş Et
+fast_food,Tantuni
+fast_food,Tavuk Tantuni
+fast_food,Et Tantuni
+ara_sicaklar_mezeler,Kaşarlı Mantar
+ara_sicaklar_mezeler,Mantar Sote
+ara_sicaklar_mezeler,Fırın Patates
+ara_sicaklar_mezeler,Patlıcan Salatası
+ara_sicaklar_mezeler,Piyaz
+ara_sicaklar_mezeler,Atom
+ara_sicaklar_mezeler,Cacık
+ara_sicaklar_mezeler,Muhammara
+ara_sicaklar_mezeler,Fava
+ara_sicaklar_mezeler,Zeytinyağlı Yaprak Sarma
+ara_sicaklar_mezeler,Kalamar Tava
+ara_sicaklar_mezeler,Karides Güveç
+ara_sicaklar_mezeler,Karides Tava
+ara_sicaklar_mezeler,Peynir Tabağı
+ara_sicaklar_mezeler,Akdeniz Salata
+ara_sicaklar_mezeler,Roka Salatası
+ara_sicaklar_mezeler,Yeşil Salata
+ara_sicaklar_mezeler,Ezme Salata
+ara_sicaklar_mezeler,Patlıcan Ezmesi
+ara_sicaklar_mezeler,Köz Biber
+tatlilar,Sütlaç
+tatlilar,Soğuk Baklava
+tatlilar,Havuç Dilimi Baklava
+tatlilar,Bülbül Yuvası
+tatlilar,Şöbiyet
+tatlilar,Tulumba Tatlısı
+tatlilar,Lokma Tatlısı
+tatlilar,Aşure
+tatlilar,Revani
+tatlilar,İrmik Helvası
+tatlilar,Un Helvası
+tatlilar,Mozaik Pasta
+tatlilar,Tiramisu
+tatlilar,Brownie
+tatlilar,Çikolatalı Sufle
+tatlilar,Dondurmalı İrmik Helvası
+tatlilar,Elmalı Turta
+tatlilar,San Sebastian Cheesecake
+tatlilar,Frambuazlı Cheesecake
+tatlilar,Çikolatalı Pasta
+icecekler,Fanta
+icecekler,Sprite
+icecekler,Gazoz
+icecekler,Portakal Suyu
+icecekler,Vişne Suyu
+icecekler,Şeftali Suyu
+icecekler,Karışık Meyve Suyu
+icecekler,Elma Suyu
+icecekler,Nar Suyu
+icecekler,Taze Sıkma Portakal
+icecekler,Cold Brew
+icecekler,Espresso
+icecekler,Double Espresso
+icecekler,Americano
+icecekler,Latte
+icecekler,Cappuccino
+icecekler,Mocha
+icecekler,Sıcak Çikolata
+icecekler,Bitki Çayı
+icecekler,Yeşil Çay
+hizmet_ve_ekstralar,Ekstra Kaşar
+hizmet_ve_ekstralar,Ekstra Peynir
+hizmet_ve_ekstralar,Ekstra Et
+hizmet_ve_ekstralar,Ekstra Tavuk
+hizmet_ve_ekstralar,Ekstra Köfte
+hizmet_ve_ekstralar,Ekstra Patates
+hizmet_ve_ekstralar,Ekstra İçecek
+hizmet_ve_ekstralar,Masa Servisi
