@@ -2,9 +2,10 @@ import argparse
 import json
 import csv
 from pathlib import Path
-from validators import dogrulama_raporu_olustur, raporu_yazdir
+from validators import dogrulama_raporu_olustur, raporu_yazdir, vkn_firma_tutarlilik_hatalarini_bul
 from generators.field_generator import rastgele_fatura
 from generators.anomaly_injector import karisik_veri_seti_uret
+
 
 
 def fatura_to_dict(fatura) -> dict:
@@ -112,6 +113,29 @@ def main():
     # Tek seferde üret, hem doğrulama hem export bu tek listeyi kullansin
     fatura_nesneleri = karisik_veri_seti_uret(args.count, args.anomali_orani)
 
+    # VKN-firma tutarsizliklari (ayni ad farkli VKN VEYA ayni VKN farkli ad)
+    # JSON/CSV export'a hiç dahil edilmesin -- sadece raporda görünmesi
+    # yetmiyor, veri setine kirli örnek olarak sizmasin istiyoruz.
+    # fatura_no_tekrari anomalisi KASITLI olarak ayni VKN'ye farkli unvan
+    # bindiriyor (validators.py'nin bunu gerçek anomali sayabilmesi için
+    # VKN'lerin eşleşmesi şart, bkz. anomaly_injector.py). Bu VKN'ler
+    # genel tutarlilik filtresinden MUAF tutulmali, yoksa kasitli anomali
+    # yanlislikla silinir.
+    korunan_vknler = {
+        f.satici_vkn for f in fatura_nesneleri
+        if "fatura_no_tekrari" in f.anomali_turleri
+    }
+
+    vkn_firma_hatalari = vkn_firma_tutarlilik_hatalarini_bul(fatura_nesneleri)
+    celiskili_adlar = set(vkn_firma_hatalari["ayni_ad_farkli_vkn"].keys())
+    celiskili_vknler = set(vkn_firma_hatalari["ayni_vkn_farkli_ad"].keys()) - korunan_vknler
+    if celiskili_adlar or celiskili_vknler:
+        once_sayisi = len(fatura_nesneleri)
+        fatura_nesneleri = [
+            f for f in fatura_nesneleri
+            if f.satici_unvan not in celiskili_adlar and f.satici_vkn not in celiskili_vknler
+        ]
+        print(f"VKN-firma tutarsizligi nedeniyle elenen fatura sayisi: {once_sayisi - len(fatura_nesneleri)}")
     rapor = dogrulama_raporu_olustur(fatura_nesneleri)
     raporu_yazdir(rapor)
 

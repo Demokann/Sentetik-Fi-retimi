@@ -25,6 +25,8 @@ class HarcamaKategorisi(str, Enum):
     KUMAR = "kumar"                     # yeni
     DIGER = "diger"                     # ölü kod
     GIYIM = "giyim"                     # yeni
+    KISISEL_BAKIM = "kisisel_bakim"      # yeni
+    TEMIZLIK = "temizlik"                # yeni
 
 # Genel geçer, şirketten bağimsiz yasakli kategoriler (kanunen kabul edilmeyen gider mantiği)
 POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
@@ -58,6 +60,8 @@ KDV_ORANI_MAP = {
     HarcamaKategorisi.EGLENCE: 20.0,
     HarcamaKategorisi.DIGER: 20.0,
     HarcamaKategorisi.GIYIM: 10.0,   # yeni — tekstil/hazır giyim indirimli KDV
+    HarcamaKategorisi.KISISEL_BAKIM: 20.0,   # yeni — varsayım, teyit gerekebilir
+    HarcamaKategorisi.TEMIZLIK: 20.0,        # yeni — varsayım
 }
 
 class IsKolu(str, Enum):
@@ -72,6 +76,9 @@ class IsKolu(str, Enum):
     ORGANIZASYON = "organizasyon"
     GIYIM_MAGAZASI = "giyim_magazasi"   # yeni
 
+    # Gerçekçi Sentetik Veri İçin Eklenmesi Gerekenler
+    KISISEL_BAKIM = "kisisel_bakim"      # Şampuan, krem, makyaj
+
 
 IS_KOLU_KATEGORILERI = {
     IsKolu.RESTORAN: [HarcamaKategorisi.YEMEK_HIZMETI],
@@ -85,13 +92,13 @@ IS_KOLU_KATEGORILERI = {
         HarcamaKategorisi.YAZILIM_LISANS,
         HarcamaKategorisi.TEKNOLOJI_EKIPMAN,
     ],
-    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA],   # <- tek tanim kaldi
+    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA, HarcamaKategorisi.TEMIZLIK],   # temizlik urunleri de markette satilir
     IsKolu.DANISMANLIK_FIRMASI: [HarcamaKategorisi.DANISMANLIK],
     IsKolu.LOJISTIK_FIRMASI: [HarcamaKategorisi.ULASIM_HIZMETI],
     IsKolu.ULASIM_SAGLAYICI: [HarcamaKategorisi.ULASIM_BIREYSEL],
     IsKolu.ORGANIZASYON: [HarcamaKategorisi.YEMEK_HIZMETI],
-    IsKolu.ORGANIZASYON: [HarcamaKategorisi.YEMEK_HIZMETI],
     IsKolu.GIYIM_MAGAZASI: [HarcamaKategorisi.GIYIM],   # yeni
+    IsKolu.KISISEL_BAKIM: [HarcamaKategorisi.KISISEL_BAKIM],
 }
 
 

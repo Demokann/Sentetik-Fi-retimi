@@ -94,18 +94,19 @@ def fatura_no_tekrarlarini_bul(faturalar: list[Fatura]) -> list[str]:
     return [no for (vkn, no), sayi in gorulen.items() if sayi > 1]
 
 
-#3. Tarih Kontrolü (Gelecek tarihli fatura olmamali)
+#4. Tarih Kontrolü (Gelecek tarihli fatura olmamali)
 def tarih_gelecekte_mi(fatura_tarihi_str: str, bugun_str: str) -> bool:
     """Fatura tarihi bugünden ileri bir tarihse True döner (hata durumu)."""
     return fatura_tarihi_str > bugun_str  # ISO format (YYYY-MM-DD) string karşilaştirmasi güvenlidir
 
 
-#4. KDV Orani Kontrolü (Kategoriye göre sabit KDV orani)
+#5. KDV Orani Kontrolü (Kategoriye göre sabit KDV orani)
 def kategori_kdv_dogrula(kalem: FaturaKalemi) -> bool:
     """Kalemin KDV orani, kategorisi için tanimli sabit orana eşit mi?"""
     beklenen_kdv = KDV_ORANI_MAP.get(kalem.harcama_kategorisi)
     return beklenen_kdv is not None and kalem.kdv_orani == beklenen_kdv
 
+#6. VKN-Firma Tutarlilik Kontrolü (Ayni VKN farkli unvan, ya da ayni unvan farkli VKN)
 def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
     """
     Ayni VKN'nin farkli firma adlariyla, ya da ayni firma adinin
@@ -125,12 +126,21 @@ def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
         "ayni_vkn_farkli_ad": celiskili_vkn,
         "ayni_ad_farkli_vkn": celiskili_ad,
     }
-
+#7. Fatura Tutarlilik Kontrolü (Footer toplamlari ile kalem toplamlari uyumlu mu?)
 def fatura_footer_tutarlilik_dogrula(fatura: Fatura) -> bool:
     """toplam_vergisiz_tutar + toplam_kdv_tutari == genel_toplam mi?"""
     beklenen = fatura.toplam_vergisiz_tutar + fatura.toplam_kdv_tutari
     return abs(fatura.genel_toplam - beklenen) < Decimal("0.01")
+# İş kolu kategori uyumusuzluğu durumundaki faturaları doğrular
 
+
+
+
+#Şirket politikası bazlı doğrulamar(kategori bazında limit aşımı, tek kalem limit aşımları, vb.) gibi kurallar da buraya eklenebilir.
+#Yasaklı kategori veya ürünler için de kontrol fonksiyonları eklenebilir. önemli!!
+#Ek olarak ondalıklı sayıyın doğruluğunu kontrol etmek için de fonksiyonlar eklenebilir. 
+#Örneğin, birim fiyatın veya miktarın belirli bir hassasiyette olup olmadığını kontrol etmek gibi.
+#Hatta, birim fiyata kasıtlı anomali ekleyip daha sonra burada kontrol fonksiyonu ile tespit edebiliriz.
 def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     """
     Tek bir faturayi tüm kurallara göre kontrol eder.
@@ -152,6 +162,7 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
 
     if not fatura_genel_toplam_dogrula(fatura):
         hatalar.append("Genel toplam, kalemlerin toplamiyla uyuşmuyor")
+    
 
     for kalem in fatura.kalemler:
         if not kalem_ara_toplam_dogrula(kalem):

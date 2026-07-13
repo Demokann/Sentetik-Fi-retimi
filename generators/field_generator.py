@@ -9,8 +9,12 @@ from pathlib import Path
 
 fake = Faker("tr_TR")
 SOYISIM_SQL_DOSYASI = Path(__file__).parent.parent / "data" / "soyisimler.sql"
-MARKET_URUNLERI_CSV = Path(__file__).parent.parent / "data" / "market_urunleri.csv"
-GIYIM_URUNLERI_CSV = Path(__file__).parent.parent / "data" / "giyim_urunleri.csv"
+MARKET_URUNLERI_CSV = Path(__file__).parent.parent / "data" / "urun_verileri" / "market_urunleri.csv"
+TEMIZ_URUNLER_CSV = Path(__file__).parent.parent / "data" /   "urun_verileri" / "temiz_urunler.csv"
+YEMEK_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "urun_verileri" /"restoran_urunleri.csv"
+DANISMANLIK_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"danismanlik_urunleri.csv"
+KONAKLAMA_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"konaklama_urunleri.csv"
+ULASIM_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"ulasim_urunleri.csv"
 
 # CSV'deki CATEGORY_NAME1 sütununun TÜM benzersiz değerlerine bakıp
 # burayı güncelleyin (örn. pandas ile: df['CATEGORY_NAME1'].unique())
@@ -21,7 +25,7 @@ MARKET_DAHIL_KATEGORILER =  {
 
 GIYIM_DAHIL_ANA_KATEGORI = "Giyim"
 
-
+#kategoriye göre uygun csv dosyasından ürünleri yükler.
 def market_urunleri_yukle(dosya_yolu: Path = MARKET_URUNLERI_CSV) -> list[str]:
     """
     Market CSV'sinden (ITEMNAME, CATEGORY_NAME1) TEMEL_GIDA açıklama
@@ -60,31 +64,51 @@ def _urun_kodu_temizle(baslik: str) -> str:
     temiz = " ".join(kelimeler).strip(" -/")
     return temiz if temiz else baslik
 
-def giyim_urunleri_yukle(dosya_yolu: Path = GIYIM_URUNLERI_CSV) -> list[str]:
+
+def temiz_urunleri_yukle(dosya_yolu: Path = TEMIZ_URUNLER_CSV) -> dict[HarcamaKategorisi, list[str]]:
     """
-    Trendyol CSV'sinden (title, categories) GIYIM açıklama havuzunu
-    üretir. categories sütunu "['Kadın', 'Giyim', ...]" formatında bir
-    string olduğu için ast.literal_eval ile parse edilir.
+    veri_temizle.py tarafından üretilen, her satırı zaten tek bir
+    HarcamaKategorisi'ne atanmış temiz CSV'yi okur. Burada ARTIK keyword
+    matching / regex YOK — sınıflandırma kararı offline'da (veri_temizle.py)
+    verildi, bu fonksiyon sadece harcama_kategorisi sütununa göre gruplayarak okuyor.
     """
     import csv as _csv
-    import ast
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    if not dosya_yolu.exists():
+        return havuzlar
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        reader = _csv.DictReader(f)
+        for satir in reader:
+            baslik = (satir.get("title") or "").strip()
+            kategori_str = (satir.get("harcama_kategorisi") or "").strip()
+            if not baslik or not kategori_str:
+                continue
+            try:
+                kategori = HarcamaKategorisi(kategori_str)
+            except ValueError:
+                continue
+            havuzlar.setdefault(kategori, []).append(_urun_kodu_temizle(baslik))
+    return havuzlar
+
+def yemek_urunleri_yukle(dosya_yolu: Path = YEMEK_URUNLERI_CSV) -> list[str]:
+    """
+    Restoran/yemek harcamasi icin hazirlanan temiz CSV'yi (kategori, urun_adi
+    sutunlari) okur. kategori sutunu (corbalar, ana_yemekler vb.) burada
+    ayrica kullanilmiyor -- tum satirlar zaten YEMEK_HIZMETI harcama
+    kategorisine ait, sadece urun_adi aciklama havuzuna alinir.
+    Dosya yoksa bos liste doner, sabit havuz tek basina devrede kalir.
+    """
+    import csv as _csv
     if not dosya_yolu.exists():
         return []
     urunler: list[str] = []
     with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
         reader = _csv.DictReader(f)
         for satir in reader:
-            ham_kategori = satir.get("categories") or ""
-            try:
-                kategori_listesi = ast.literal_eval(ham_kategori)
-            except (ValueError, SyntaxError):
-                kategori_listesi = []
-            if GIYIM_DAHIL_ANA_KATEGORI in kategori_listesi:
-                baslik = (satir.get("title") or "").strip()
-                if baslik:
-                    urunler.append(_urun_kodu_temizle(baslik))
+            urun = (satir.get("urun_adi") or "").strip()
+            if urun:
+                urunler.append(urun)
     return urunler
-
 
 # 2.1 — Kategoriye göre açiklama havuzu
 
@@ -178,11 +202,58 @@ ACIKLAMA_HAVUZU = {
 
 # CSV'lerden gelen ürünlerle havuzu zenginleştir/değiştir (dosya yoksa sabit liste kalır)
 _market_urunleri = market_urunleri_yukle()
-if _market_urunleri:
-    ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMEL_GIDA] = _market_urunleri
 
-_giyim_urunleri = giyim_urunleri_yukle()
-ACIKLAMA_HAVUZU[HarcamaKategorisi.GIYIM] = _giyim_urunleri or ["Giyim Ürünü"]
+TEMEL_GIDA_MARKET_HAVUZU = _market_urunleri or ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMEL_GIDA]
+TEMEL_GIDA_MARKET_AGIRLIGI = 0.6   # rastgele_kalem icinde agirlikli secim icin
+
+# YEMEK_HIZMETI: CSV'deki ~100 kusur urun havuzun ONUNE eklenir, sabit
+# el-yazimi liste SILINMEZ -- ayni faturada kalem sayisi CSV'yi tuketirse
+# (BUYUK_HAVUZ_ESIGI altinda oldugu icin rastgele_kalem'deki mevcut dedup
+# filtresi zaten devrede), filtreleme otomatik olarak eski sabit listeye
+# duser. Ayri bir agirlik/fallback kodu gerekmez.
+_yemek_urunleri = yemek_urunleri_yukle()
+if _yemek_urunleri:
+    ACIKLAMA_HAVUZU[HarcamaKategorisi.YEMEK_HIZMETI] = (
+        _yemek_urunleri + ACIKLAMA_HAVUZU[HarcamaKategorisi.YEMEK_HIZMETI]
+    )
+
+_temiz_urunler = temiz_urunleri_yukle()
+
+# Bu kategorilerin elle yazılmış havuzu yok / azınlıkta — CSV'den geleni
+# doğrudan ata, yoksa tek satırlık fallback'e düş.
+_SIFIRDAN_HAVUZ_FALLBACK = {
+    HarcamaKategorisi.GIYIM: ["Giyim Ürünü"],
+    HarcamaKategorisi.KISISEL_BAKIM: ["Kişisel Bakım Ürünü"],
+    HarcamaKategorisi.YAZILIM_LISANS: None,   # asagida ayrica ekleniyor (mevcut liste var)
+}
+for _kategori in (HarcamaKategorisi.GIYIM, HarcamaKategorisi.KISISEL_BAKIM):
+    ACIKLAMA_HAVUZU[_kategori] = _temiz_urunler.get(_kategori) or _SIFIRDAN_HAVUZ_FALLBACK[_kategori]
+
+# TEMIZLIK: artik ayri IsKolu yok, MARKET altinda kullaniliyor. CSV'den
+# geleni ata, yoksa tek satirlik fallback.
+ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK] = _temiz_urunler.get(HarcamaKategorisi.TEMIZLIK) or ["Temizlik Ürünü"]
+
+# Supermarket etiketiyle gelen TEMEL_GIDA urunleri (temiz_urunler.csv) —
+# market_urunleri.csv'den AYRI tutuluyor, cunku rastgele_kalem'de ikisi
+# arasinda %60/%40 agirlikli secim yapilacak (cesitlilik icin).
+TEMEL_GIDA_SUPERMARKET_HAVUZU = _temiz_urunler.get(HarcamaKategorisi.TEMEL_GIDA, [])
+
+# ACIKLAMA_HAVUZU[TEMEL_GIDA]: sadece uzunluk hesaplari (rastgele_fatura
+# icindeki toplam_musait_aciklama) icin birlesik liste olarak tutuluyor;
+# asil SECIM rastgele_kalem icinde iki ayri havuzdan agirlikli yapiliyor.
+ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMEL_GIDA] = TEMEL_GIDA_MARKET_HAVUZU + TEMEL_GIDA_SUPERMARKET_HAVUZU
+
+# Elle yazılmış havuzu ZATEN OLAN kategorilerde CSV'den geleni ÜZERİNE
+# YAZMA, mevcut listeye EKLE.
+for _kategori in (
+    HarcamaKategorisi.OFIS_MOBILYA,
+    HarcamaKategorisi.OFIS_SARF_MALZEME,
+    HarcamaKategorisi.TEKNOLOJI_EKIPMAN,
+    HarcamaKategorisi.YAZILIM_LISANS,
+):
+    _ekstra = _temiz_urunler.get(_kategori)
+    if _ekstra:
+        ACIKLAMA_HAVUZU[_kategori] = ACIKLAMA_HAVUZU[_kategori] + _ekstra
 
 # Kategoriye göre makul birim fiyat araliği (KDV hariç, TL)
 # (kategori, birim) -> (min, max) fiyat araliği
@@ -239,6 +310,8 @@ FIYAT_ARALIGI_GENEL = {
     HarcamaKategorisi.DIGER: (100, 5000),
     HarcamaKategorisi.DIGER: (100, 5000),
     HarcamaKategorisi.GIYIM: (150, 3000),   # yeni, kaba varsayım — isterseniz ayarlayın
+    HarcamaKategorisi.KISISEL_BAKIM: (50, 800),
+    HarcamaKategorisi.TEMIZLIK: (30, 500),
 }
 
 # Kategoriye göre uygun birim
@@ -259,6 +332,8 @@ BIRIM_HAVUZU = {
     HarcamaKategorisi.KUMAR: ["Adet"],
     HarcamaKategorisi.DIGER: ["Adet"],
     HarcamaKategorisi.GIYIM: ["Adet"],
+    HarcamaKategorisi.KISISEL_BAKIM: ["Adet"],
+    HarcamaKategorisi.TEMIZLIK: ["Adet"],
 }
 """
 SEKTOR_KELIME_HAVUZU = {
@@ -297,6 +372,7 @@ IS_KOLU_SEKTOR_KELIME = {
     IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
     IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
     IsKolu.GIYIM_MAGAZASI: ["Tekstil", "Giyim", "Moda"],   # yeni
+    IsKolu.KISISEL_BAKIM: ["Kozmetik", "Bakım", "Güzellik"],
 }
 """SUFFIX_HAVUZU = ["Ltd. Şti.", "A.Ş.", "Tic. Ltd. Şti."] """
 
@@ -312,6 +388,7 @@ IS_KOLU_SUFFIX = {
     IsKolu.ORGANIZASYON: ["Ltd. Şti.", "Prodüksiyon A.Ş."],
     IsKolu.ORGANIZASYON: ["Ltd. Şti.", "Prodüksiyon A.Ş."],
     IsKolu.GIYIM_MAGAZASI: ["Tekstil Tic. Ltd. Şti.", "Konfeksiyon A.Ş."],   # yeni
+    IsKolu.KISISEL_BAKIM: ["Kozmetik Tic. Ltd. Şti.", "A.Ş."],
 }
 
 # Uzun unvan varyasyonlari için ek kelime havuzu
@@ -489,21 +566,31 @@ def rastgele_kalem(
     kategori = random.choice(izinli_kategoriler)
     birim = rastgele_birim(kategori)
 
-
-# Büyük havuzlarda (CSV kaynaklı, binlerce eleman) tekrar filtresi hem
+    # Büyük havuzlarda (CSV kaynaklı, binlerce eleman) tekrar filtresi hem
     # gereksiz maliyetli hem de anlamsız (çakışma ihtimali zaten ~0),
     # o yüzden sadece küçük (elle yazılmış) havuzlarda filtreleme yapılır.
-    havuz = ACIKLAMA_HAVUZU[kategori]
     BUYUK_HAVUZ_ESIGI = 500
 
-    if len(havuz) > BUYUK_HAVUZ_ESIGI:
-        aciklama = random.choice(havuz)
+    if kategori == HarcamaKategorisi.TEMEL_GIDA:
+        # Cesitlilik icin iki ayri kaynaktan agirlikli secim:
+        # %60 market_urunleri.csv, %40 temiz_urunler.csv (Supermarket etiketi).
+        # Ikisi de buyuk havuz oldugu icin dedup filtresi uygulanmiyor.
+        if random.random() < TEMEL_GIDA_MARKET_AGIRLIGI and TEMEL_GIDA_MARKET_HAVUZU:
+            aciklama = random.choice(TEMEL_GIDA_MARKET_HAVUZU)
+        elif TEMEL_GIDA_SUPERMARKET_HAVUZU:
+            aciklama = random.choice(TEMEL_GIDA_SUPERMARKET_HAVUZU)
+        else:
+            aciklama = random.choice(TEMEL_GIDA_MARKET_HAVUZU)
     else:
-        musait_aciklamalar = [a for a in havuz if a not in kullanilan_aciklamalar]
-        if not musait_aciklamalar:
-            musait_aciklamalar = havuz
-        aciklama = random.choice(musait_aciklamalar)
-        kullanilan_aciklamalar.add(aciklama)
+        havuz = ACIKLAMA_HAVUZU[kategori]
+        if len(havuz) > BUYUK_HAVUZ_ESIGI:
+            aciklama = random.choice(havuz)
+        else:
+            musait_aciklamalar = [a for a in havuz if a not in kullanilan_aciklamalar]
+            if not musait_aciklamalar:
+                musait_aciklamalar = havuz
+            aciklama = random.choice(musait_aciklamalar)
+            kullanilan_aciklamalar.add(aciklama)
 
     return FaturaKalemi(
         kalem_no=kalem_no,
