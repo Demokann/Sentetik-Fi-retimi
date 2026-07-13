@@ -125,7 +125,8 @@ def main():
         f.satici_vkn for f in fatura_nesneleri
         if "fatura_no_tekrari" in f.anomali_turleri
     }
-
+    # VKN-firma tutarsizliklari nedeniyle elenen fatura sayisi raporlanacak, ama
+    # bu fatura_nesneleri listesi export'a dahil edilmeyecek.
     vkn_firma_hatalari = vkn_firma_tutarlilik_hatalarini_bul(fatura_nesneleri)
     celiskili_adlar = set(vkn_firma_hatalari["ayni_ad_farkli_vkn"].keys())
     celiskili_vknler = set(vkn_firma_hatalari["ayni_vkn_farkli_ad"].keys()) - korunan_vknler
