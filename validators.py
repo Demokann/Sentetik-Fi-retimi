@@ -4,6 +4,7 @@ from schema import (
     Fatura, FaturaKalemi, HarcamaKategorisi, KDV_ORANI_MAP, paraya_yuvarla,
     IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
 )
+from generators.field_generator import FIYAT_ARALIGI_DETAYLI, FIYAT_ARALIGI_GENEL
 
 
 
@@ -126,6 +127,22 @@ def kalem_limit_asimi_mi(kalem: FaturaKalemi) -> bool:
     """Kalemin birim fiyati, kategorisi için tanimli politika limitini aşiyor mu?"""
     limit = POLICY_TUTAR_LIMITLERI.get(kalem.harcama_kategorisi)
     return limit is not None and kalem.birim_fiyat > Decimal(str(limit))
+#5e. Fahiş Fiyat Kontrolü (ondalik_kaymasi gibi anomalileri yakalamak için)
+def kalem_fahis_fiyat_mi(kalem: FaturaKalemi, esik_carpani: float = 5.0) -> bool:
+    """
+    Kalemin birim fiyati, kategori+birim icin tanimli normal fiyat araliginin
+    ust sinirinin `esik_carpani` katini asiyorsa fahis/anormal fiyat sayilir.
+    NOT: Diger kontrollerden farkli - deterministik bir kural degil,
+    field_generator.py'daki fiyat araliklarina dayali istatistiksel bir esik
+    kontrolu. ondalik_kaymasi (10x/100x) gibi kaba sapmalari yakalamak icin
+    yeterince genis bir marj (5x) kullaniyoruz; boylece rastgele_birim_fiyat
+    icindeki normal %10 gurultu payi (max ~%30 sapma) ile karismiyor.
+    """
+    ust_sinir = FIYAT_ARALIGI_DETAYLI.get(
+        (kalem.harcama_kategorisi, kalem.birim),
+        FIYAT_ARALIGI_GENEL.get(kalem.harcama_kategorisi, (None, None))
+    )[1]
+    return ust_sinir is not None and kalem.birim_fiyat > Decimal(str(ust_sinir * esik_carpani))
 
 #6. VKN-Firma Tutarlilik Kontrolü (Ayni VKN farkli unvan, ya da ayni unvan farkli VKN)
 def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
@@ -211,6 +228,11 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
                 f"LIMIT_ASIMI: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
                 f"birim fiyati limiti aşiyor: {kalem.birim_fiyat} > {limit}"
             )
+        if kalem_fahis_fiyat_mi(kalem):
+            hatalar.append(
+                f"FAHIS_FIYAT: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
+                f"birim fiyati normal aralik disinda: {kalem.birim_fiyat}"
+            )
 
     return hatalar
 
@@ -250,6 +272,7 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
                     limit_asimi_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
                 elif hata.startswith("IS_KOLU_UYUMSUZLUGU:"):
                     is_kolu_uyumsuzlugu_sayisi += 1
+
 
     return {
         "toplam_fatura": len(faturalar),
