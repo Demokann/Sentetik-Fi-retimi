@@ -144,6 +144,20 @@ def kalem_fahis_fiyat_mi(kalem: FaturaKalemi, esik_carpani: float = 5.0) -> bool
     )[1]
     return ust_sinir is not None and kalem.birim_fiyat > Decimal(str(ust_sinir * esik_carpani))
 
+#5f. Düşük Fiyat Kontrolü (dusuk_ondalik_kaymasi gibi anomalileri yakalamak için)
+def kalem_dusuk_fiyat_mi(kalem: FaturaKalemi, esik_carpani: float = 5.0) -> bool:
+    """
+    kalem_fahis_fiyat_mi'nin simetriği: kalemin birim fiyati, kategori+birim
+    icin tanimli normal fiyat araliginin ALT sinirinin `esik_carpani`'na
+    bölünmüş halinin altina düşüyorsa anormal düşük fiyat sayilir.
+    """
+    alt_sinir = FIYAT_ARALIGI_DETAYLI.get(
+        (kalem.harcama_kategorisi, kalem.birim),
+        FIYAT_ARALIGI_GENEL.get(kalem.harcama_kategorisi, (None, None))
+    )[0]
+    return alt_sinir is not None and kalem.birim_fiyat < Decimal(str(alt_sinir / esik_carpani))
+
+
 #6. VKN-Firma Tutarlilik Kontrolü (Ayni VKN farkli unvan, ya da ayni unvan farkli VKN)
 def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
     """
@@ -233,6 +247,11 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
                 f"FAHIS_FIYAT: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
                 f"birim fiyati normal aralik disinda: {kalem.birim_fiyat}"
             )
+        if kalem_dusuk_fiyat_mi(kalem):
+            hatalar.append(
+                f"DUSUK_FIYAT: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
+                f"birim fiyati normal aralik altinda: {kalem.birim_fiyat}"
+            )
 
     return hatalar
 
@@ -247,6 +266,8 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
     ayni_ad_farkli_vkn = vkn_firma_hatalari["ayni_ad_farkli_vkn"] 
 
     fatura_hatalari: dict[int, dict] = {}   # artik indeks bazli önceden fatura no key di tekrari halinde eski fatura nonun üstüne yazilacakti, bu yüzden dict[int, dict] tipinde
+    fahis_fiyat_detaylari: list[dict] = []    # yeni
+    dusuk_fiyat_detaylari: list[dict] = []    # yeni
     yasakli_kategori_detaylari: list[dict] = []
     limit_asimi_detaylari: list[dict] = []
     is_kolu_uyumsuzlugu_sayisi = 0
@@ -270,6 +291,8 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
                     yasakli_kategori_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
                 elif hata.startswith("LIMIT_ASIMI:"):
                     limit_asimi_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
+                elif hata.startswith("DUSUK_FIYAT:"):
+                    dusuk_fiyat_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
                 elif hata.startswith("IS_KOLU_UYUMSUZLUGU:"):
                     is_kolu_uyumsuzlugu_sayisi += 1
 
@@ -286,6 +309,10 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
         "limit_asimi_sayisi": len(limit_asimi_detaylari),                # yeni
         "limit_asimi_detaylari": limit_asimi_detaylari,                  # yeni
         "is_kolu_uyumsuzlugu_sayisi": is_kolu_uyumsuzlugu_sayisi,        # yeni
+        "fahis_fiyat_sayisi": len(fahis_fiyat_detaylari),        # yeni
+        "fahis_fiyat_detaylari": fahis_fiyat_detaylari,          # yeni
+        "dusuk_fiyat_sayisi": len(dusuk_fiyat_detaylari),        # yeni
+        "dusuk_fiyat_detaylari": dusuk_fiyat_detaylari,          # yeni
     }
 
 
@@ -329,6 +356,18 @@ def raporu_yazdir(rapor: dict) -> None:
     if rapor.get("limit_asimi_detaylari"):
         print("  ⚠️  Limit aşimi örnekleri:")
         for detay in rapor["limit_asimi_detaylari"][:5]:
+            print(f"    [{detay['fatura_no']}] {detay['detay']}")
+    
+    print(f"  Fahiş Fiyat İhlali           : {rapor.get('fahis_fiyat_sayisi', 0)}")
+    if rapor.get("fahis_fiyat_detaylari"):
+        print("  ⚠️  Fahiş fiyat örnekleri:")
+        for detay in rapor["fahis_fiyat_detaylari"][:5]:
+            print(f"    [{detay['fatura_no']}] {detay['detay']}")
+
+    print(f"  Düşük Fiyat İhlali           : {rapor.get('dusuk_fiyat_sayisi', 0)}")
+    if rapor.get("dusuk_fiyat_detaylari"):
+        print("  ⚠️  Düşük fiyat örnekleri:")
+        for detay in rapor["dusuk_fiyat_detaylari"][:5]:
             print(f"    [{detay['fatura_no']}] {detay['detay']}")
 
     print(f"  İş Kolu-Kategori Uyumsuzluğu : {rapor.get('is_kolu_uyumsuzlugu_sayisi', 0)}")

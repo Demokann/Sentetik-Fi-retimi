@@ -5,7 +5,7 @@ from decimal import Decimal
 from schema import (
     Fatura, FaturaKalemi, HarcamaKategorisi,
     IS_KOLU_KATEGORILERI, KDV_ORANI_MAP,
-    POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
+    POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI, paraya_yuvarla
 )
 from generators.field_generator import (
     ACIKLAMA_HAVUZU, rastgele_birim, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura
@@ -355,6 +355,64 @@ def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:  #Tespiti ile ilgili
 
     return fatura
 
+# 8. Ters Yönlü Ondalık Kaymasi (Fiyat Çok Düşük)
+
+def dusuk_ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
+    """
+    ondalik_kaymasi_anomali_uret'in ters yönü: veri girişi hatasi simülasyonu,
+    ama bu kez fiyat kasitli olarak 10x ya da 100x KÜÇÜLTÜLÜYOR (ör. kuruş/lira
+    karişikliği, ya da ondalik noktasinin yanliş yazilmasi). Diğer matematiksel
+    anomalilerden farkli - gerçek birim_fiyat değişiyor, dolayisiyla kalemin
+    kendi içindeki hesaplar (ara_toplam/kdv_tutari/satir_toplam) tutarli kalir.
+    Tespiti matematiksel doğrulamayla değil, fahiş/anormal düşük fiyat
+    tespitiyle (istatistiksel/iş kurali) yapilmali.
+    """
+    hedef_index = random.randrange(len(fatura.kalemler))
+    kalem = fatura.kalemler[hedef_index]
+
+    kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
+    kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat / kayma_carpani)
+
+    return fatura
+
+
+# 9. Basamak/Rakam Karişikliği (Transposition Hatasi)
+
+def basamak_karisikligi_anomali_uret(fatura: Fatura) -> Fatura:
+    """
+    Veri girişi hatasi simülasyonu: birim_fiyat'in tam kisminda BİTİŞİK iki
+    basamağin yerini kasitli olarak değiştirir (ör. 1234.50 -> 1324.50).
+    Büyüklük mertebesi ayni kaldiği için ne matematiksel doğrulama ne de
+    eşik-tabanli fahiş fiyat kontrolü (kalem_fahis_fiyat_mi) bunu yakalar --
+    bilhassa modelin kategori/birim/fiyat ilişkisini daha ince öğrenmesi
+    için tasarlanmiş, tespiti zor bir anomali.
+    """
+    hedef_index = random.randrange(len(fatura.kalemler))
+    kalem = fatura.kalemler[hedef_index]
+
+    tam_kisim, kurus_kisim = f"{kalem.birim_fiyat:.2f}".split(".")
+
+    if len(tam_kisim) < 2:
+        # tek haneli tam kisimda yer değiştirilecek iki basamak yok, atla
+        return fatura
+
+    basamaklar = list(tam_kisim)
+    pozisyon = random.randint(0, len(basamaklar) - 2)
+    basamaklar[pozisyon], basamaklar[pozisyon + 1] = basamaklar[pozisyon + 1], basamaklar[pozisyon]
+
+    # baştaki basamak 0'a düşerse (ör. "0234") anlamsizlaşir, geri al
+    if basamaklar[0] == "0":
+        return fatura
+
+    yeni_fiyat = Decimal(f"{''.join(basamaklar)}.{kurus_kisim}")
+
+    if yeni_fiyat == kalem.birim_fiyat:
+        # basamaklar ayni olduğu için (ör. "11" -> "11") fark oluşmadi, atla
+        return fatura
+
+    kalem.birim_fiyat = yeni_fiyat
+    return fatura
+
 ANOMALI_FONKSIYONLARI = {
     "gelecek_tarihli": gelecek_tarihli_anomali_uret,
     "gecersiz_kimlik_no": gecersiz_kimlik_no_anomali_uret,
@@ -367,6 +425,8 @@ ANOMALI_FONKSIYONLARI = {
     "satir_toplami": satir_toplami_anomali_uret,
     "sistematik_yuvarlama": sistematik_yuvarlama_anomali_uret,
     "ondalik_kaymasi": ondalik_kaymasi_anomali_uret,
+    "dusuk_ondalik_kaymasi": dusuk_ondalik_kaymasi_anomali_uret,   # yeni
+    "basamak_karisikligi": basamak_karisikligi_anomali_uret,       # yeni
     "genel_toplam": genel_toplam_anomali_uret,
     "footer_kismi": footer_kismi_anomali_uret,
     # fatura_no_tekrari burada YOK: iki fatura arasinda çalişiyor, ayri ele aliniyor
