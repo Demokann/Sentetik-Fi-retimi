@@ -213,6 +213,7 @@ def genel_toplam_anomali_uret(fatura: Fatura) -> Fatura:
         satici_unvan=fatura.satici_unvan,
         alici_vkn=fatura.alici_vkn,
         alici_unvan=fatura.alici_unvan,
+        is_kolu=fatura.is_kolu,   # yeni
         kalemler=fatura.kalemler,
         sahte_toplam_vergisiz_tutar=getattr(fatura, "sahte_toplam_vergisiz_tutar", None),
         sahte_toplam_kdv_tutari=getattr(fatura, "sahte_toplam_kdv_tutari", None),
@@ -251,6 +252,7 @@ def footer_kismi_anomali_uret(fatura: Fatura) -> Fatura:
         alici_vkn=fatura.alici_vkn,
         alici_unvan=fatura.alici_unvan,
         kalemler=fatura.kalemler,
+        is_kolu=fatura.is_kolu,   # yeni
         sahte_genel_toplam=mevcut_sahte_genel_toplam,
         sahte_toplam_vergisiz_tutar=sahte_vergisiz,
         sahte_toplam_kdv_tutari=sahte_kdv,
@@ -371,27 +373,38 @@ ANOMALI_FONKSIYONLARI = {
 }
 
 
-def fatura_no_tekrari_uygula(faturalar: list[Fatura]) -> None:
+def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> None:
     """
-    fatura_no_tekrari anomalisi, tek fatura yerine İKİ fatura arasinda
-    çalişir. Validator'in (fatura_no_tekrarlarini_bul) bunu gerçek bir
-    anomali sayabilmesi için iki faturanin satici_vkn'i AYNI olmali —
-    farkli VKN'li faturalarin ayni no'yu paylaşmasi artik anomali
-    sayilmiyor (bkz. validators.py). Bu yüzden ikinci faturanin VKN'si
-    kasitli olarak birinciyle eşitleniyor, sonra no çakiştiriliyor.
-    Liste yerinde (in-place) değiştirilir, dönüş değeri yok.
+    fatura_no_tekrari anomalisini `tekrar_sayisi` kadar farkli çift üzerinde
+    uygular. Her çift icin VKN'nin yani sira SATICI UNVANI da eşitlenir --
+    aksi halde ayni VKN farkli unvanla eşleşmiş olur ki bu, kasitli
+    fatura_no_tekrari anomalisiyle karişan, istenmeyen ayri bir VKN-firma
+    tutarsizligi üretir. Gerçek hayatta bir VKN her zaman tek bir firmaya
+    ait olduğu icin unvan da eşitlenerek ilişki gerçekçi kaliyor.
+    Ayrica ayni faturanin birden fazla çiftte kullanilmasini önlemek icin
+    kullanilmiş indeksler takip edilir.
     """
     if len(faturalar) < 2:
         return
 
-    idx1, idx2 = random.sample(range(len(faturalar)), 2)
-    f1, f2 = faturalar[idx1], faturalar[idx2]
+    kullanilmis_indeksler: set[int] = set()
 
-    f2.satici_vkn = f1.satici_vkn  # anomalinin gerçek sayilmasi için şart!
-    faturalar[idx2] = fatura_no_tekrari_anomali_uret(f2, f1.fatura_no)
-    faturalar[idx2].is_anomali = True
-    faturalar[idx2].anomali_turleri = faturalar[idx2].anomali_turleri + ["fatura_no_tekrari"]
+    for _ in range(tekrar_sayisi):
+        musait_indeksler = [i for i in range(len(faturalar)) if i not in kullanilmis_indeksler]
+        if len(musait_indeksler) < 2:
+            break   # havuz tükendi, daha fazla çift üretilemez
 
+        idx1, idx2 = random.sample(musait_indeksler, 2)
+        f1, f2 = faturalar[idx1], faturalar[idx2]
+
+        f2.satici_vkn = f1.satici_vkn      # anomalinin gerçek sayilmasi için şart
+        f2.satici_unvan = f1.satici_unvan  # ayni VKN = ayni firma tutarliliğini korumak için şart
+        faturalar[idx2] = fatura_no_tekrari_anomali_uret(f2, f1.fatura_no)
+        faturalar[idx2].is_anomali = True
+        faturalar[idx2].anomali_turleri = faturalar[idx2].anomali_turleri + ["fatura_no_tekrari"]
+
+        kullanilmis_indeksler.add(idx1)
+        kullanilmis_indeksler.add(idx2)
 
 def karisik_veri_seti_uret(adet: int, anomali_orani: float = 0.2) -> list[Fatura]:
     """
@@ -415,11 +428,11 @@ def karisik_veri_seti_uret(adet: int, anomali_orani: float = 0.2) -> list[Fatura
         fatura.anomali_turleri = fatura.anomali_turleri + [isim]
         faturalar[idx] = fatura
 
-    fatura_no_tekrar_oranı = 0.02  # tüm faturalarin %5'inde fatura_no_tekrari anomalisi
+    fatura_no_tekrar_orani = 0.01
+    tekrar_sayisi = int(adet * fatura_no_tekrar_orani)   # 10.000 faturada ~100 çift
 
-    # fatura_no_tekrari havuzda olmadigi için ayrica, düşük bir olasilikla uygula
-    if anomali_orani > 0 and random.random() < fatura_no_tekrar_oranı:
-        fatura_no_tekrari_uygula(faturalar)
+    if anomali_orani > 0 and tekrar_sayisi > 0:
+        fatura_no_tekrari_uygula(faturalar, tekrar_sayisi)
 
     return faturalar
 

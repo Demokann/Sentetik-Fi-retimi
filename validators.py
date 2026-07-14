@@ -1,6 +1,9 @@
 from decimal import Decimal
 from datetime import date
-from schema import Fatura, FaturaKalemi, HarcamaKategorisi, KDV_ORANI_MAP, paraya_yuvarla
+from schema import (
+    Fatura, FaturaKalemi, HarcamaKategorisi, KDV_ORANI_MAP, paraya_yuvarla,
+    IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
+)
 
 
 
@@ -82,7 +85,7 @@ def fatura_genel_toplam_dogrula(fatura: Fatura) -> bool:
 
 #3. Fatura No Tekrar Kontrolü (Hepsi unique olmali)
 
-def fatura_no_tekrarlarini_bul(faturalar: list[Fatura]) -> list[str]:
+def fatura_no_tekrarlarini_bul(faturalar: list[Fatura]) -> list[tuple[str, str]]:
     """
     Ayni satici_vkn altinda birden fazla kez geçen fatura no'lari döndürür.
     Farkli VKN'li firmalarin ayni fatura no'yu kullanmasi anomali sayilmaz.
@@ -91,7 +94,7 @@ def fatura_no_tekrarlarini_bul(faturalar: list[Fatura]) -> list[str]:
     for fatura in faturalar:
         anahtar = (fatura.satici_vkn, fatura.fatura_no)
         gorulen[anahtar] = gorulen.get(anahtar, 0) + 1
-    return [no for (vkn, no), sayi in gorulen.items() if sayi > 1]
+    return [anahtar for anahtar, sayi in gorulen.items() if sayi > 1]
 
 
 #4. Tarih Kontrolü (Gelecek tarihli fatura olmamali)
@@ -105,6 +108,24 @@ def kategori_kdv_dogrula(kalem: FaturaKalemi) -> bool:
     """Kalemin KDV orani, kategorisi için tanimli sabit orana eşit mi?"""
     beklenen_kdv = KDV_ORANI_MAP.get(kalem.harcama_kategorisi)
     return beklenen_kdv is not None and kalem.kdv_orani == beklenen_kdv
+
+#5b. İş Kolu - Kategori Uyum Kontrolü
+def kalem_is_kolu_uyumu_dogrula(kalem: FaturaKalemi, izinli_kategoriler: list[HarcamaKategorisi]) -> bool:
+    """Kalemin kategorisi, faturanın iş koluna izinli kategoriler arasında mı?"""
+    return kalem.harcama_kategorisi in izinli_kategoriler
+
+
+#5c. Politika İhlali — Yasakli Kategori Kontrolü
+def kalem_yasakli_kategoride_mi(kalem: FaturaKalemi) -> bool:
+    """Kalem, iş kolu bağlamından bağımsız olarak politika gereği yasaklı bir kategoride mi?"""
+    return kalem.harcama_kategorisi in POLICY_YASAKLI_KATEGORILER
+
+
+#5d. Politika İhlali — Limit Aşımı Kontrolü
+def kalem_limit_asimi_mi(kalem: FaturaKalemi) -> bool:
+    """Kalemin birim fiyati, kategorisi için tanimli politika limitini aşiyor mu?"""
+    limit = POLICY_TUTAR_LIMITLERI.get(kalem.harcama_kategorisi)
+    return limit is not None and kalem.birim_fiyat > Decimal(str(limit))
 
 #6. VKN-Firma Tutarlilik Kontrolü (Ayni VKN farkli unvan, ya da ayni unvan farkli VKN)
 def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
@@ -163,6 +184,7 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     if not fatura_genel_toplam_dogrula(fatura):
         hatalar.append("Genel toplam, kalemlerin toplamiyla uyuşmuyor")
     
+    izinli_kategoriler = IS_KOLU_KATEGORILERI.get(fatura.is_kolu, [])
 
     for kalem in fatura.kalemler:
         if not kalem_ara_toplam_dogrula(kalem):
@@ -173,6 +195,22 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
             hatalar.append(f"Kalem {kalem.kalem_no}: satir_toplam hesabi hatali")
         if not kategori_kdv_dogrula(kalem):
             hatalar.append(f"Kalem {kalem.kalem_no}: KDV orani kategoriyle uyuşmuyor")
+        if not kalem_is_kolu_uyumu_dogrula(kalem, izinli_kategoriler):
+            hatalar.append(
+                f"IS_KOLU_UYUMSUZLUGU: Kalem {kalem.kalem_no} iş koluna ({fatura.is_kolu.value}) "
+                f"uygun değil: {kalem.harcama_kategorisi.value}"
+            )
+        if kalem_yasakli_kategoride_mi(kalem):
+            hatalar.append(
+                f"YASAKLI_KATEGORI: Kalem {kalem.kalem_no} yasakli kategoride: "
+                f"{kalem.harcama_kategorisi.value}"
+            )
+        if kalem_limit_asimi_mi(kalem):
+            limit = POLICY_TUTAR_LIMITLERI[kalem.harcama_kategorisi]
+            hatalar.append(
+                f"LIMIT_ASIMI: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
+                f"birim fiyati limiti aşiyor: {kalem.birim_fiyat} > {limit}"
+            )
 
     return hatalar
 
@@ -187,19 +225,31 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
     ayni_ad_farkli_vkn = vkn_firma_hatalari["ayni_ad_farkli_vkn"] 
 
     fatura_hatalari: dict[int, dict] = {}   # artik indeks bazli önceden fatura no key di tekrari halinde eski fatura nonun üstüne yazilacakti, bu yüzden dict[int, dict] tipinde
+    yasakli_kategori_detaylari: list[dict] = []
+    limit_asimi_detaylari: list[dict] = []
+    is_kolu_uyumsuzlugu_sayisi = 0
+
     for i, fatura in enumerate(faturalar):
         hatalar = fatura_dogrula(fatura, bugun_str)
         if (fatura.satici_vkn, fatura.fatura_no) in tekrar_eden_kayitlar:
             hatalar.append(f"Fatura no birden fazla kez kullanilmiş (ayni VKN altinda): {fatura.fatura_no}")
         
-        if fatura.satici_vkn in ayni_vkn_farkli_ad:   # sadece VKN çelişkisi geçersizlik sayilir
+        if fatura.satici_vkn in ayni_vkn_farkli_ad:   #aynı VKN birden fazla şirkette varsa geçersizlik sayilir
             hatalar.append(f"Satici VKN'si farkli unvanlarla eşleşmiş: {fatura.satici_vkn}")
         
-        if fatura.satici_unvan in ayni_ad_farkli_vkn:   # ayni ada sahip farkli vknler var, ama bu geçersizlik sayilmaz, uyari olarak rapora eklenir
+        if fatura.satici_unvan in ayni_ad_farkli_vkn:   # ayni ada sahip farkli vknler varsa, geçersiz.
            hatalar.append(f"Satici unvani farkli VKN'lerle eşleşmiş: {fatura.satici_unvan}")
             
         if hatalar:
             fatura_hatalari[i] = {"fatura_no": fatura.fatura_no, "hatalar": hatalar}
+
+            for hata in hatalar:
+                if hata.startswith("YASAKLI_KATEGORI:"):
+                    yasakli_kategori_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
+                elif hata.startswith("LIMIT_ASIMI:"):
+                    limit_asimi_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
+                elif hata.startswith("IS_KOLU_UYUMSUZLUGU:"):
+                    is_kolu_uyumsuzlugu_sayisi += 1
 
     return {
         "toplam_fatura": len(faturalar),
@@ -208,6 +258,11 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
         "fatura_no_tekrarlari": [f"{vkn}:{no}" for vkn, no in tekrar_eden_kayitlar],
         "vkn_firma_tutarsizliklari": vkn_firma_hatalari,
         "hata_detaylari": fatura_hatalari,
+        "yasakli_kategori_sayisi": len(yasakli_kategori_detaylari),      # yeni
+        "yasakli_kategori_detaylari": yasakli_kategori_detaylari,        # yeni
+        "limit_asimi_sayisi": len(limit_asimi_detaylari),                # yeni
+        "limit_asimi_detaylari": limit_asimi_detaylari,                  # yeni
+        "is_kolu_uyumsuzlugu_sayisi": is_kolu_uyumsuzlugu_sayisi,        # yeni
     }
 
 
@@ -240,6 +295,20 @@ def raporu_yazdir(rapor: dict) -> None:
         print("\n  Ayni firma adi farkli VKN ile üretilmiş (isim havuzu çakişmasi, düşük öncelikli):")
         for ad, vknler in list(ayni_ad_farkli_vkn.items())[:5]:  #ayni ada sahip farkli vknleri yazdir, 5 ten fazlasini yazdirma.
             print(f"    {ad}: {vknler}")
+
+    print(f"\n  Yasakli Kategori İhlali      : {rapor.get('yasakli_kategori_sayisi', 0)}")
+    if rapor.get("yasakli_kategori_detaylari"):
+        print("  ⚠️  Yasakli kategori örnekleri:")
+        for detay in rapor["yasakli_kategori_detaylari"][:5]:
+            print(f"    [{detay['fatura_no']}] {detay['detay']}")
+
+    print(f"  Limit Aşimi İhlali           : {rapor.get('limit_asimi_sayisi', 0)}")
+    if rapor.get("limit_asimi_detaylari"):
+        print("  ⚠️  Limit aşimi örnekleri:")
+        for detay in rapor["limit_asimi_detaylari"][:5]:
+            print(f"    [{detay['fatura_no']}] {detay['detay']}")
+
+    print(f"  İş Kolu-Kategori Uyumsuzluğu : {rapor.get('is_kolu_uyumsuzlugu_sayisi', 0)}")
    
 
     if rapor["hata_detaylari"]:

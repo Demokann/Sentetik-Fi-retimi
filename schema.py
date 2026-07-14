@@ -38,8 +38,8 @@ POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
 
 # Kategori bazli üst tutar limitleri (aşilirsa şüpheli sayilir)
 POLICY_TUTAR_LIMITLERI: dict[HarcamaKategorisi, float] = {
-    HarcamaKategorisi.YEMEK_HIZMETI: 1000,
-    HarcamaKategorisi.KONAKLAMA: 15000,
+    HarcamaKategorisi.YEMEK_HIZMETI: 2500,
+    HarcamaKategorisi.KONAKLAMA: 20000,
     HarcamaKategorisi.ULASIM_BIREYSEL: 5000,
 }
 
@@ -146,6 +146,7 @@ class Fatura(BaseModel):
     alici_vkn: str
     alici_unvan: str
     kalemler: List[FaturaKalemi]
+    is_kolu: IsKolu   # yeni — iş kolu/kategori uyumsuzluğu validasyonu için şart
     is_anomali: bool = False
     anomali_turleri: List[str] = Field(default_factory=list) 
 

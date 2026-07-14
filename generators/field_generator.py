@@ -655,6 +655,7 @@ def rastgele_fatura() -> Fatura:
         satici_unvan=satici_adi,
         alici_vkn=ALICI_VKN_SABIT,
         alici_unvan=ALICI_UNVAN_SABIT,
+        is_kolu=is_kolu,   # yeni
         kalemler=kalemler,
     )
 
