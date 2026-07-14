@@ -160,6 +160,9 @@ def main():
     print(f"  JSON -> {json_yolu}")
     print(f"  CSV  -> {csv_yolu}")
     print(f"  Etiketler -> {etiket_yolu}")
+    rapor_yolu = output_dir / f"{args.filename}_rapor.json"
+    with open(rapor_yolu, "w", encoding="utf-8") as f:
+        json.dump(rapor, f, ensure_ascii=False, indent=2, default=list)
 
 
 if __name__ == "__main__":
