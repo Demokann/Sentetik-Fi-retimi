@@ -38,7 +38,7 @@ POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
 
 # Kategori bazli üst tutar limitleri (aşilirsa şüpheli sayilir)
 POLICY_TUTAR_LIMITLERI: dict[HarcamaKategorisi, float] = {
-    HarcamaKategorisi.YEMEK_HIZMETI: 2500,
+    HarcamaKategorisi.YEMEK_HIZMETI: 3000,
     HarcamaKategorisi.KONAKLAMA: 20000,
     HarcamaKategorisi.ULASIM_BIREYSEL: 5000,
 }

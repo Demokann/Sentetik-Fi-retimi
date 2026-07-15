@@ -626,21 +626,21 @@ def rastgele_fatura() -> Fatura:
     is_kolu = random.choice(list(IsKolu))
     izinli_kategoriler = IS_KOLU_KATEGORILERI[is_kolu]
 
-    firma_turu = rastgele_firma_turu()             # 1. adim: tür seç
+    firma_turu = rastgele_firma_turu()             # 1. adim: tür seç (taksonomi)
     satici_adi = rastgele_firma_adi(is_kolu, firma_turu)   # 2. adim: isim üret
-    satici_kimlik = rastgele_kimlik_no(firma_turu)    
+    satici_kimlik = rastgele_kimlik_no(firma_turu)         #3. adim: kimlik no üret
 
     fatura_tarihi = rastgele_tarih()        
     fatura_no = rastgele_fatura_no(fatura_tarihi)
     
-    # Bu iş kolunda toplam kaç benzersiz açiklama üretilebilir?
+    # Bu iş kolunda toplam kaç benzersiz açiklama üretilebilir? artık csv dosyalarından verileri çekildiği için bu gereksiz olabilir
     toplam_musait_aciklama = sum(
         len(ACIKLAMA_HAVUZU[kategori]) for kategori in izinli_kategoriler
     )
 
     # Kalem sayisi, mevcut çeşitliliği aşmasin (en fazla 8, ama havuz küçükse ona göre kisitla)
     ust_sinir = min(8, toplam_musait_aciklama)
-    kalem_sayisi = random.randint(1, max(1, ust_sinir))      # 3. adim: kimlik no üret
+    kalem_sayisi = random.randint(1, max(1, ust_sinir))      
 
     kullanilan_aciklamalar: set[str] = set()
     kalemler = [

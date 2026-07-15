@@ -49,10 +49,10 @@ def kdv_kategori_uyumsuzlugu_anomali_uret(fatura: Fatura) -> Fatura:
 # 4. İş Kolu - Kategori Uyumsuzluğu
 
 def is_kolu_kategori_uyumsuzlugu_anomali_uret(fatura: Fatura) -> Fatura:
-    """Faturaya, mevcut kalemlerin kategorisiyle hiç ilgisi olmayan bir kalem ekler."""
-    mevcut_kategoriler = {k.harcama_kategorisi for k in fatura.kalemler}
+    """Faturaya, faturanin is_kolu'suna hiç izinli olmayan bir kalem ekler."""
+    izinli_kategoriler = set(IS_KOLU_KATEGORILERI.get(fatura.is_kolu, []))
     tum_kategoriler = set(HarcamaKategorisi)
-    yabanci_kategoriler = list(tum_kategoriler - mevcut_kategoriler - POLICY_YASAKLI_KATEGORILER)
+    yabanci_kategoriler = list(tum_kategoriler - izinli_kategoriler - POLICY_YASAKLI_KATEGORILER)
     yabanci_kategori = random.choice(yabanci_kategoriler)
 
     yeni_kalem_no = len(fatura.kalemler) + 1
@@ -104,8 +104,30 @@ def limit_asimi_anomali_uret(fatura: Fatura) -> Fatura:
     ]
 
     if not limitli_kalemler:
-        kalem = fatura.kalemler[0]
-        kalem.birim_fiyat = kalem.birim_fiyat * Decimal("10")
+        # Faturada limitli kategori yok -- rastgele bir limitli kategoriden
+        # YENİ bir kalem ekleyip onu limit üstü fiyatlandiriyoruz.
+        limitli_kategori = random.choice(list(POLICY_TUTAR_LIMITLERI.keys()))
+        yeni_kalem_no = len(fatura.kalemler) + 1
+        birim = rastgele_birim(limitli_kategori)
+        limit = POLICY_TUTAR_LIMITLERI[limitli_kategori]
+        yeni_kalem = FaturaKalemi(
+            kalem_no=yeni_kalem_no,
+            aciklama=random.choice(ACIKLAMA_HAVUZU[limitli_kategori]),
+            harcama_kategorisi=limitli_kategori,
+            miktar=rastgele_miktar(birim),
+            birim=birim,
+            birim_fiyat=Decimal(str(limit * random.uniform(1.5, 3.0))),
+            iskonto_orani=0.0,
+            kdv_orani=KDV_ORANI_MAP[limitli_kategori],
+        )
+        fatura.kalemler.append(yeni_kalem)
+
+        if limitli_kategori not in IS_KOLU_KATEGORILERI.get(fatura.is_kolu, []):
+            # Eklenen kategori, iş koluna zaten yabanci -- validator bunu
+            # ayrica IS_KOLU_UYUMSUZLUGU olarak da yakalayacak, ground truth
+            # bunu yansitsin.
+            fatura.anomali_turleri = fatura.anomali_turleri + ["is_kolu_kategori_uyumsuzlugu"]
+
         return fatura
 
     kalem = random.choice(limitli_kalemler)
@@ -483,7 +505,16 @@ def karisik_veri_seti_uret(adet: int, anomali_orani: float = 0.2) -> list[Fatura
 
     for idx in anomalili_indexler:
         isim, fonksiyon = random.choice(fonksiyon_havuzu)
+        oncesi = faturalar[idx].model_copy(deep=True)
         fatura = fonksiyon(faturalar[idx])
+
+        if fatura == oncesi:
+            # no-op durumu (ör. tek kalemli faturada sistematik_yuvarlama,
+            # ya da basamak_karisikligi'nde erken return) -- anomali
+            # gerçekte uygulanmadi, is_anomali/anomali_turleri etiketlenmez.
+            faturalar[idx] = fatura
+            continue
+
         fatura.is_anomali = True
         fatura.anomali_turleri = fatura.anomali_turleri + [isim]
         faturalar[idx] = fatura

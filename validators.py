@@ -5,6 +5,7 @@ from schema import (
     IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
 )
 from generators.field_generator import FIYAT_ARALIGI_DETAYLI, FIYAT_ARALIGI_GENEL
+from generators.anomaly_injector import ANOMALI_FONKSIYONLARI
 
 
 
@@ -127,6 +128,7 @@ def kalem_limit_asimi_mi(kalem: FaturaKalemi) -> bool:
     """Kalemin birim fiyati, kategorisi için tanimli politika limitini aşiyor mu?"""
     limit = POLICY_TUTAR_LIMITLERI.get(kalem.harcama_kategorisi)
     return limit is not None and kalem.birim_fiyat > Decimal(str(limit))
+
 #5e. Fahiş Fiyat Kontrolü (ondalik_kaymasi gibi anomalileri yakalamak için)
 def kalem_fahis_fiyat_mi(kalem: FaturaKalemi, esik_carpani: float = 5.0) -> bool:
     """
@@ -255,7 +257,38 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
 
     return hatalar
 
+# 8. Üretim Sonrasi Invariant Kontrolü (regresyon güvenlik ağı)
 
+def veri_seti_dogrula(faturalar: list[Fatura], hedef_oran: float, tolerans: float = 0.03) -> list[str]:
+    """
+    Üretilen veri setinin temel beklentilerini kontrol eder, ihlalleri
+    string listesi olarak döner (boşsa her şey beklenen sinirlar içinde
+    demektir). Bu fonksiyon etiketleri DEĞİŞTİRMEZ, sadece uyarir --
+    amaci gelecekte sessizce oluşabilecek regresyonlari (ör. bir anomali
+    türünün hiç üretilememesi, oranin ciddi sapmasi) erkenden yakalamak.
+    """
+    uyarilar: list[str] = []
+
+    if not faturalar:
+        return ["Fatura listesi boş"]
+
+    gercek_oran = sum(f.is_anomali for f in faturalar) / len(faturalar)
+    if abs(gercek_oran - hedef_oran) > tolerans:
+        uyarilar.append(
+            f"Anomali orani hedeften sapiyor: gerçek={gercek_oran:.3f}, "
+            f"hedef={hedef_oran:.3f}, tolerans={tolerans:.3f}"
+        )
+
+    turler_sayaci: dict[str, int] = {}
+    for f in faturalar:
+        for tur in f.anomali_turleri:
+            turler_sayaci[tur] = turler_sayaci.get(tur, 0) + 1
+
+    for isim in ANOMALI_FONKSIYONLARI:
+        if turler_sayaci.get(isim, 0) == 0:
+            uyarilar.append(f"Anomali türü hiç üretilmemiş: {isim}")
+
+    return uyarilar
 
 def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
     bugun_str = date.today().isoformat()
