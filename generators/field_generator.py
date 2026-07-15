@@ -15,6 +15,7 @@ YEMEK_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "urun_verileri" /"
 DANISMANLIK_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"danismanlik_urunleri.csv"
 KONAKLAMA_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"konaklama_urunleri.csv"
 ULASIM_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"ulasim_urunleri.csv"
+ANOMALI_URUNLERI_CSV = Path(__file__).parent.parent / "data" / "anomali_veri" / "anomali_urunler.csv"
 
 # CSV'deki CATEGORY_NAME1 sütununun TÜM benzersiz değerlerine bakıp
 # burayı güncelleyin (örn. pandas ile: df['CATEGORY_NAME1'].unique())
@@ -109,6 +110,33 @@ def yemek_urunleri_yukle(dosya_yolu: Path = YEMEK_URUNLERI_CSV) -> list[str]:
             if urun:
                 urunler.append(urun)
     return urunler
+
+def anomali_urunleri_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
+    """
+    anomalili_veriler.csv'yi (kategori, urun_adi sutunlari) okur. kategori
+    sutunundaki degerler (alkol, tutun_urunleri, eglence, kumar)
+    HarcamaKategorisi enum degerleriyle birebir eslesiyor, ayri bir
+    eslestirme tablosu gerekmiyor. Dosya yoksa bos dict doner, mevcut
+    sabit havuzlar (ACIKLAMA_HAVUZU icindeki elle yazilmis 3-4 elemanli
+    listeler) devrede kalir.
+    """
+    import csv as _csv
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    if not dosya_yolu.exists():
+        return havuzlar
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        reader = _csv.DictReader(f)
+        for satir in reader:
+            kategori_str = (satir.get("kategori") or "").strip().lower()
+            urun = (satir.get("urun_adi") or "").strip()
+            if not kategori_str or not urun:
+                continue
+            try:
+                kategori = HarcamaKategorisi(kategori_str)
+            except ValueError:
+                continue
+            havuzlar.setdefault(kategori, []).append(urun)
+    return havuzlar
 
 # 2.1 — Kategoriye göre açiklama havuzu
 
@@ -218,6 +246,21 @@ if _yemek_urunleri:
     )
 
 _temiz_urunler = temiz_urunleri_yukle()
+
+_anomali_urunleri = anomali_urunleri_yukle()
+
+# ALKOL/EGLENCE/TUTUN_URUNLERI/KUMAR: elle yazilmis sabit listeler sadece
+# 3-4 elemanliydi, CSV çok daha zengin (100'lerce ürün) -- CSV varsa
+# üzerine YAZIYORUZ (append degil), yoksa eski sabit liste fallback olarak kalir.
+for _kategori in (
+    HarcamaKategorisi.ALKOL,
+    HarcamaKategorisi.EGLENCE,
+    HarcamaKategorisi.TUTUN_URUNLERI,
+    HarcamaKategorisi.KUMAR,
+):
+    _ekstra = _anomali_urunleri.get(_kategori)
+    if _ekstra:
+        ACIKLAMA_HAVUZU[_kategori] = _ekstra
 
 # Bu kategorilerin elle yazılmış havuzu yok / azınlıkta — CSV'den geleni
 # doğrudan ata, yoksa tek satırlık fallback'e düş.
