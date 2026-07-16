@@ -17,37 +17,45 @@ KONAKLAMA_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verile
 ULASIM_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"ulasim_urunleri.csv"
 ANOMALI_URUNLERI_CSV = Path(__file__).parent.parent / "data" / "anomali_veri" / "anomali_urunler.csv"
 
-# CSV'deki CATEGORY_NAME1 sütununun TÜM benzersiz değerlerine bakıp
-# burayı güncelleyin (örn. pandas ile: df['CATEGORY_NAME1'].unique())
-MARKET_DAHIL_KATEGORILER =  {
-                            "GIDA", "MEYVE SEBZE", "SÜT KAHVALTILIK", "İÇECEK", 
-                            "DETERJAN TEMİZLİK", "KAĞIT", "KOZMETİK", "ET TAVUK", 
-                            "SİGARA", "EV", "BEBEK", "PET"}
+# CSV kategorisi -> HarcamaKategorisi eşlemesi. Karşılığı olmayan satırlar
+# (KAĞIT/EV/BEBEK/PET gibi şu anki şemada kategorisi bulunmayanlar) BİLİNÇLİ
+# olarak eşlemeye dahil EDİLMEDİ, aksi halde TEMEL_GIDA'ya sızarlardı.
+# SİGARA de KASITLI olarak burada YOK: bu ürünler sadece anomali_urunleri_yukle()
+# üzerinden TUTUN_URUNLERI anomali havuzuna girmeli, normal üretimde asla kullanılmamalı.
+MARKET_KATEGORI_ESLESTIRME: dict[str, HarcamaKategorisi] = {
+    "GIDA": HarcamaKategorisi.TEMEL_GIDA,
+    "MEYVE SEBZE": HarcamaKategorisi.TEMEL_GIDA,
+    "SÜT KAHVALTILIK": HarcamaKategorisi.TEMEL_GIDA,
+    "İÇECEK": HarcamaKategorisi.TEMEL_GIDA,
+    "ET TAVUK": HarcamaKategorisi.TEMEL_GIDA,
+    "DETERJAN TEMİZLİK": HarcamaKategorisi.TEMIZLIK,
+    "KOZMETİK": HarcamaKategorisi.KISISEL_BAKIM,
+}
 
 GIYIM_DAHIL_ANA_KATEGORI = "Giyim"
 
-#kategoriye göre uygun csv dosyasından ürünleri yükler.
-def market_urunleri_yukle(dosya_yolu: Path = MARKET_URUNLERI_CSV) -> list[str]:
+def market_urunleri_yukle(dosya_yolu: Path = MARKET_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
     """
-    Market CSV'sinden (ITEMNAME, CATEGORY_NAME1) TEMEL_GIDA açıklama
-    havuzunu üretir. Sadece MARKET_DAHIL_KATEGORILER içindeki kategoriler
-    alınır (temizlik/kozmetik gibi gıda-dışı satırlar elenir).
-    Dosya yoksa boş liste döner, mevcut sabit havuz devrede kalır.
+    Market CSV'sinden (ITEMNAME, CATEGORY_NAME1) kategoriye göre GRUPLANMIŞ
+    açıklama havuzu üretir. MARKET_KATEGORI_ESLESTIRME'de karşılığı olmayan
+    satırlar (SİGARA dahil) elenir -- artık tek bir düz TEMEL_GIDA listesine
+    karışmıyorlar. Dosya yoksa boş dict döner.
     """
     import csv as _csv
     if not dosya_yolu.exists():
-        return []
-    urunler: list[str] = []
+        return {}
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
     with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
-        # NOT: dosyanız virgülle ayrılmışsa delimiter="," yapın
-        reader = _csv.DictReader(f)   # varsayılan delimiter=","
+        reader = _csv.DictReader(f)
         for satir in reader:
-            kategori = (satir.get("CATEGORY_NAME1") or "").strip().upper()
-            if kategori in MARKET_DAHIL_KATEGORILER:
-                isim = (satir.get("ITEMNAME") or "").strip()
-                if isim:
-                    urunler.append(isim.title())
-    return urunler
+            kategori_str = (satir.get("CATEGORY_NAME1") or "").strip().upper()
+            hedef_kategori = MARKET_KATEGORI_ESLESTIRME.get(kategori_str)
+            if hedef_kategori is None:
+                continue
+            isim = (satir.get("ITEMNAME") or "").strip()
+            if isim:
+                havuzlar.setdefault(hedef_kategori, []).append(isim.title())
+    return havuzlar
 
 #helper method ürün adında gereksiz şeyleri temizler.
 def _urun_kodu_temizle(baslik: str) -> str:
@@ -304,8 +312,13 @@ ACIKLAMA_HAVUZU = {
 # CSV'lerden gelen ürünlerle havuzu zenginleştir/değiştir (dosya yoksa sabit liste kalır)
 _market_urunleri = market_urunleri_yukle()
 
-TEMEL_GIDA_MARKET_HAVUZU = _market_urunleri or ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMEL_GIDA]
-TEMEL_GIDA_MARKET_AGIRLIGI = 0.6   # rastgele_kalem icinde agirlikli secim icin
+_market_urunleri = market_urunleri_yukle()
+
+TEMEL_GIDA_MARKET_HAVUZU = (
+    _market_urunleri.get(HarcamaKategorisi.TEMEL_GIDA)
+    or ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMEL_GIDA]
+)
+TEMEL_GIDA_MARKET_AGIRLIGI = 0.6
 
 # YEMEK_HIZMETI: CSV'deki ~100 kusur urun havuzun ONUNE eklenir, sabit
 # el-yazimi liste SILINMEZ -- ayni faturada kalem sayisi CSV'yi tuketirse
@@ -363,6 +376,20 @@ _SIFIRDAN_HAVUZ_FALLBACK = {
 }
 for _kategori in (HarcamaKategorisi.GIYIM, HarcamaKategorisi.KISISEL_BAKIM):
     ACIKLAMA_HAVUZU[_kategori] = _temiz_urunler.get(_kategori) or _SIFIRDAN_HAVUZ_FALLBACK[_kategori]
+
+# Market CSV'sindeki KOZMETİK/DETERJAN TEMİZLİK satırlarıyla ilgili
+# havuzları zenginleştir (üzerine yazma, ekle).
+_market_kisisel_bakim = _market_urunleri.get(HarcamaKategorisi.KISISEL_BAKIM, [])
+if _market_kisisel_bakim:
+    ACIKLAMA_HAVUZU[HarcamaKategorisi.KISISEL_BAKIM] = (
+        ACIKLAMA_HAVUZU[HarcamaKategorisi.KISISEL_BAKIM] + _market_kisisel_bakim
+    )
+
+_market_temizlik = _market_urunleri.get(HarcamaKategorisi.TEMIZLIK, [])
+if _market_temizlik:
+    ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK] = (
+        ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK] + _market_temizlik
+    )
 
 # TEMIZLIK: artik ayri IsKolu yok, MARKET altinda kullaniliyor. CSV'den
 # geleni ata, yoksa tek satirlik fallback.

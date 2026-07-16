@@ -488,7 +488,7 @@ def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> Non
         kullanilmis_indeksler.add(idx1)
         kullanilmis_indeksler.add(idx2)
 
-def karisik_veri_seti_uret(adet: int, anomali_orani: float = 0.2) -> list[Fatura]:
+def karisik_veri_seti_uret(adet: int, anomali_orani: float) -> list[Fatura]:
     """
     `adet` kadar fatura üretir, bunlarin `anomali_orani` kadarina rastgele
     bir anomali uygulayip etiketler (is_anomali, anomali_turleri). Etiket
