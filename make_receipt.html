@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>masrafAI - Sentetik Fiş</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 20mm 15mm;
+            background-color: #ffffff;
+        }
+        body {
+            /* Senin orijinal kodundaki tarayıcı arkaplanı ve font ailesi */
+            font-family: 'Courier New', Courier, monospace;
+            color: #000000;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 10px;
+            font-size: 11pt;
+            line-height: 1.2;
+            text-transform: uppercase; /* Fiş karakteristiği için her şeyi büyük harf yapar */
+        }
+        .receipt-container {
+            /* Ekranda 80mm rulo hissini veren kutu tasarımı */
+            width: 100%;
+            max-width: 350px; 
+            margin: 20px auto;
+            background-color: #ffffff;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            border-radius: 2px;
+            box-sizing: border-box;
+        }
+        @media (max-width: 480px) {
+            body {
+                padding: 0;
+                background-color: #ffffff;
+            }
+            .receipt-container {
+                margin: 0 auto;
+                box-shadow: none;
+                border-radius: 0;
+                padding: 15px;
+                max-width: 100%;
+            }
+        }
+        .center { text-align: center; }
+        .right { text-align: right; }
+        .dashed-line {
+            border-top: 1px dashed #000000;
+            margin: 10px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        td {
+            vertical-align: top;
+            padding: 2px 0;
+        }
+        
+        /* Kalem hizalamaları (PDF'teki yapının aynısı) */
+        .item-name { width: 55%; padding-right: 5px; word-wrap: break-word; }
+        .item-kdv { width: 15%; text-align: center; }
+        .item-price { width: 30%; text-align: right; }
+    </style>
+</head>
+<body>
+    <div class="receipt-container">
+        
+        <!-- Üst Bilgi (Ortalanmış) -->
+        <div class="center">
+            <b>{{ satici_unvan }}</b><br>
+            {{ satici_kimlik_etiketi }}: {{ satici_vkn }}<br>
+        </div>
+        <br>
+        
+        <!-- Tarih ve Fiş No -->
+        <table style="margin-bottom: 5px;">
+            <tr>
+                <td style="width: 40%;">TARİH</td>
+                <td style="width: 60%;">: {{ fatura_tarihi }}</td>
+            </tr>
+            <tr>
+                <td>FİŞ NO</td>
+                <td>: {{ fatura_no }}</td>
+            </tr>
+        </table>
+
+        <div class="dashed-line"></div>
+
+        <!-- Kalemler Listesi (Başlıksız, market formatı) -->
+        <table>
+            {% for kalem in kalemler %}
+            <tr>
+                <td class="item-name">{{ kalem.aciklama }}</td>
+                <td class="item-kdv">%{{ kalem.kdv_orani | int }}</td>
+                <td class="item-price">*{{ kalem.satir_toplam }}</td>
+            </tr>
+            <!-- Adet 1'den farklıysa veya birim Kg ise alt satıra detay yazdır -->
+            {% if kalem.miktar != 1 or kalem.birim != 'Adet' %}
+            <tr>
+                <td colspan="3" style="font-size: 10pt; padding-bottom: 4px; color: #222;">
+                    {{ kalem.miktar }} {{ kalem.birim }} X {{ kalem.birim_fiyat }}
+                </td>
+            </tr>
+            {% endif %}
+            
+            <!-- İskonto varsa eksi olarak alt satıra ekle -->
+            {% if kalem.iskonto_orani > 0 %}
+            <tr>
+                <td class="item-name" style="padding-left: 10px;">İNDİRİM</td>
+                <td class="item-kdv"></td>
+                <td class="item-price">-{{ "%.2f"|format(kalem.ara_toplam * (kalem.iskonto_orani / 100)) }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </table>
+
+        <div class="dashed-line"></div>
+
+        <!-- Toplamlar -->
+        <table>
+            <tr>
+                <td style="width: 50%;">TOPKDV</td>
+                <td class="right" style="width: 50%;">*{{ toplam_kdv_tutari }}</td>
+            </tr>
+            <tr>
+                <td><b>TOPLAM</b></td>
+                <td class="right"><b>*{{ genel_toplam }}</b></td>
+            </tr>
+        </table>
+
+        <div class="dashed-line"></div>
+        
+        <!-- Alıcı ve Alt Bilgi -->
+        <div class="center" style="margin-top: 15px; line-height: 1.4;">
+            ALICI: {{ alici_unvan }}<br>
+            VKN/TCKN: {{ alici_vkn }}<br><br>
+        </div>
+        
+    </div>
+</body>
+</html>
