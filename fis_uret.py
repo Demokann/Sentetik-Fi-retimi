@@ -5,10 +5,18 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from playwright.sync_api import sync_playwright
 
+from generators.field_generator import TAM_SAYI_BIRIMLERI
+
 
 def kimlik_etiketi(kimlik_no: str) -> str:
     """10 haneliyse VKN, 11 haneliyse TCKN etiketi döndürür."""
     return "TCKN" if len(kimlik_no) == 11 else "VKN"
+
+def miktar_formatla(birim: str, miktar: float) -> str:
+    """Tam sayıysa '3', değilse '3.45' şeklinde gösterir (gereksiz .0 basmaz)."""
+    if birim in TAM_SAYI_BIRIMLERI:
+        return str(int(miktar))
+    return f"{miktar:.2f}"
 
 
 def main():
@@ -44,7 +52,10 @@ def main():
             # oldugu gibi kopyaliyoruz. Tek eklenen alan: VKN/TCKN etiketi.
             baglam = dict(fatura)
             baglam["satici_kimlik_etiketi"] = kimlik_etiketi(fatura["satici_vkn"])
-
+            baglam["kalemler"] = [
+                {**kalem, "miktar": miktar_formatla(kalem["birim"], kalem["miktar"])}
+                for kalem in fatura["kalemler"]
+            ]
             html_icerik = template.render(**baglam)
             sayfa.set_content(html_icerik)
 

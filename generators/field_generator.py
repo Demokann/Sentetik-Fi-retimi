@@ -111,6 +111,79 @@ def yemek_urunleri_yukle(dosya_yolu: Path = YEMEK_URUNLERI_CSV) -> list[str]:
                 urunler.append(urun)
     return urunler
 
+def danismanlik_urunleri_yukle(dosya_yolu: Path = DANISMANLIK_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
+    """Danışmanlık harcamaları için hazırlanan temiz CSV'yi okur."""
+    import csv as _csv
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    if not dosya_yolu.exists():
+        return havuzlar
+        
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        reader = _csv.DictReader(f)
+        for satir in reader:
+            kategori_str = (satir.get("kategori") or "").strip().lower()
+            urun = (satir.get("urun_adi") or "").strip()
+            
+            if not kategori_str or not urun:
+                continue
+            try:
+                kategori = HarcamaKategorisi(kategori_str)
+            except ValueError:
+                continue
+                
+            havuzlar.setdefault(kategori, []).append(urun)
+            
+    return havuzlar
+
+
+def konaklama_urunleri_yukle(dosya_yolu: Path = KONAKLAMA_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
+    """Konaklama harcamaları için hazırlanan temiz CSV'yi okur."""
+    import csv as _csv
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    if not dosya_yolu.exists():
+        return havuzlar
+        
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        reader = _csv.DictReader(f)
+        for satir in reader:
+            kategori_str = (satir.get("kategori") or "").strip().lower()
+            urun = (satir.get("urun_adi") or "").strip()
+            
+            if not kategori_str or not urun:
+                continue
+            try:
+                kategori = HarcamaKategorisi(kategori_str)
+            except ValueError:
+                continue
+                
+            havuzlar.setdefault(kategori, []).append(urun)
+            
+    return havuzlar
+
+
+def ulasim_urunleri_yukle(dosya_yolu: Path = ULASIM_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
+    """Ulaşım harcamaları için hazırlanan temiz CSV'yi okur."""
+    import csv as _csv
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    if not dosya_yolu.exists():
+        return havuzlar
+        
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        reader = _csv.DictReader(f)
+        for satir in reader:
+            kategori_str = (satir.get("kategori") or "").strip().lower()
+            urun = (satir.get("urun_adi") or "").strip()
+            
+            if not kategori_str or not urun:
+                continue
+            try:
+                kategori = HarcamaKategorisi(kategori_str)
+            except ValueError:
+                continue
+                
+            havuzlar.setdefault(kategori, []).append(urun)
+            
+    return havuzlar
 def anomali_urunleri_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
     """
     anomalili_veriler.csv'yi (kategori, urun_adi sutunlari) okur. kategori
@@ -244,6 +317,25 @@ if _yemek_urunleri:
     ACIKLAMA_HAVUZU[HarcamaKategorisi.YEMEK_HIZMETI] = (
         _yemek_urunleri + ACIKLAMA_HAVUZU[HarcamaKategorisi.YEMEK_HIZMETI]
     )
+# 1. Danışmanlık Ürünleri
+_danismanlik_urunleri = danismanlik_urunleri_yukle()
+for kategori, urunler in _danismanlik_urunleri.items():
+    if urunler:
+        ACIKLAMA_HAVUZU[kategori] = urunler  # Üzerine yaz (ez)
+
+# 2. Konaklama Ürünleri
+_konaklama_urunleri = konaklama_urunleri_yukle()
+for kategori, urunler in _konaklama_urunleri.items():
+    if urunler:
+        ACIKLAMA_HAVUZU[kategori] = urunler  # Üzerine yaz (ez)
+
+# 3. Ulaşım Ürünleri
+_ulasim_urunleri = ulasim_urunleri_yukle()
+for kategori, urunler in _ulasim_urunleri.items():
+    if urunler:
+        # Eğer ulasim.csv içinde kategori HIZMETI ve BIREYSEL diye ayrılmışsa
+        # bu döngü direkt doğru yere yazacaktır.
+        ACIKLAMA_HAVUZU[kategori] = urunler
 
 _temiz_urunler = temiz_urunleri_yukle()
 
@@ -594,7 +686,7 @@ def rastgele_birim_fiyat(kategori: HarcamaKategorisi, birim: str) -> Decimal:
 def kdv_orani_belirle(kategori: HarcamaKategorisi) -> float:
     return KDV_ORANI_MAP[kategori]
 
-TAM_SAYI_BIRIMLERI = {"Adet", "Kutu", "Kişi", "Gece", "Lisans", "Şişe"}
+TAM_SAYI_BIRIMLERI = {"Adet", "Kutu", "Kişi", "Gece", "Lisans", "Şişe", "Kullanici"}
 
 def rastgele_miktar(birim: str) -> float:
     if birim in TAM_SAYI_BIRIMLERI:

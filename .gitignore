@@ -4,7 +4,7 @@ __pycache__/
 .env
 
 .DS_Store
-
+deneme.py
 # data içindeki her şeyi ignore et
 data/*
 
