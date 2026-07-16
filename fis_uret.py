@@ -49,7 +49,7 @@ def main():
             sayfa.set_content(html_icerik)
 
             eleman = sayfa.locator(".receipt-container")
-            cikti_yolu = output_dir / f"{fatura['fatura_no']}.png"
+            cikti_yolu = output_dir / f"{i:06d}_{fatura['fatura_no']}.png"
             eleman.screenshot(path=str(cikti_yolu))
 
             if i % 500 == 0:
