@@ -4,7 +4,7 @@ __pycache__/
 .env
 
 .DS_Store
-templates/*
+
 # data içindeki her şeyi ignore et
 data/*
 
@@ -19,3 +19,4 @@ data/*
 !data/anomali_verileri/*.csv
 
 /UBLTR_1.2.1_Paketi
+/rapor_analiz.py
