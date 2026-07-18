@@ -37,6 +37,8 @@ POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
 }
 
 # Kategori bazli üst tutar limitleri (aşilirsa şüpheli sayilir)
+#!ÖNEMLİ
+#FIYAT_ARALIGI_'daki %30 dışarı-taşma üst sınırının üzerinde tutulmalı, aksi halde doğal gürültü limit_asimi'yı organik olarak tetikleyebilir."* 
 POLICY_TUTAR_LIMITLERI: dict[HarcamaKategorisi, float] = {
     HarcamaKategorisi.YEMEK_HIZMETI: 3000,
     HarcamaKategorisi.KONAKLAMA: 20000,

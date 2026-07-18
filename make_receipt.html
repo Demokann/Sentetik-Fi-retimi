@@ -97,7 +97,7 @@
                 <td class="item-name">{{ kalem.aciklama }}</td>
                 <td class="item-kdv">%{{ kalem.kdv_orani | int }}</td>
                 <td class="item-price">*{{ kalem.satir_toplam }}</td>
-            </tr>
+            </tr> 
             <!-- Adet 1'den farklıysa veya birim Kg ise alt satıra detay yazdır -->
             {% if kalem.miktar != 1 or kalem.birim != 'Adet' %}
             <tr>

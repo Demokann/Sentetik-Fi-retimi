@@ -1,24 +1,24 @@
-kategori,urun_adi
-danismanlik,Danışmanlık Hizmeti
-danismanlik,Hukuki Danışmanlık
-danismanlik,Avukatlık ve Dava Vekalet Ücreti
-danismanlik,Mali Müşavirlik Hizmeti
-danismanlik,Bağımsız Denetim Hizmeti
-danismanlik,Vergi Danışmanlığı
-danismanlik,Proje Yönetim Danışmanlığı
-danismanlik,İnsan Kaynakları Danışmanlığı
-danismanlik,İşe Alım Hizmet Bedeli
-danismanlik,IT/Bilişim Danışmanlığı
-danismanlik,Siber Güvenlik Danışmanlığı
-danismanlik,Yazılım Mimari Danışmanlığı
-danismanlik,Yönetim Danışmanlığı
-danismanlik,Stratejik Planlama Hizmeti
-danismanlik,Kalite Yönetim Danışmanlığı (ISO vb.)
-danismanlik,Marka ve Patent Danışmanlığı
-danismanlik,Gümrük Müşavirliği Hizmeti
-danismanlik,Yatırım Danışmanlığı
-danismanlik,Fizibilite Raporu Hazırlama
-danismanlik,Pazarlama ve PR Danışmanlığı
-danismanlik,Sosyal Medya Yönetimi
-danismanlik,İSG (İş Sağlığı ve Güvenliği) Hizmeti
-danismanlik,KVKK Danışmanlığı
+kategori,urun_adi,birim
+danismanlik,Danışmanlık Hizmeti,Saat
+danismanlik,Hukuki Danışmanlık,Saat
+danismanlik,Avukatlık ve Dava Vekalet Ücreti,Adet
+danismanlik,Mali Müşavirlik Hizmeti,Ay
+danismanlik,Bağımsız Denetim Hizmeti,Adet
+danismanlik,Vergi Danışmanlığı,Saat
+danismanlik,Proje Yönetim Danışmanlığı,Ay
+danismanlik,İnsan Kaynakları Danışmanlığı,Ay
+danismanlik,İşe Alım Hizmet Bedeli,Adet
+danismanlik,IT/Bilişim Danışmanlığı,Saat
+danismanlik,Siber Güvenlik Danışmanlığı,Ay
+danismanlik,Yazılım Mimari Danışmanlığı,Saat
+danismanlik,Yönetim Danışmanlığı,Ay
+danismanlik,Stratejik Planlama Hizmeti,Adet
+danismanlik,Kalite Yönetim Danışmanlığı (ISO vb.),Adet
+danismanlik,Marka ve Patent Danışmanlığı,Adet
+danismanlik,Gümrük Müşavirliği Hizmeti,Adet
+danismanlik,Yatırım Danışmanlığı,Ay
+danismanlik,Fizibilite Raporu Hazırlama,Adet
+danismanlik,Pazarlama ve PR Danışmanlığı,Ay
+danismanlik,Sosyal Medya Yönetimi,Ay
+danismanlik,İSG (İş Sağlığı ve Güvenliği) Hizmeti,Ay
+danismanlik,KVKK Danışmanlığı,Adet

@@ -2,7 +2,10 @@ import argparse
 import json
 import csv
 from pathlib import Path
-from validators import dogrulama_raporu_olustur, raporu_yazdir, vkn_firma_tutarlilik_hatalarini_bul
+from validators import (
+    dogrulama_raporu_olustur, raporu_yazdir, vkn_firma_tutarlilik_hatalarini_bul,
+    kural_ihlali_turlerini_tespit_et,
+)
 from generators.field_generator import rastgele_fatura
 from generators.anomaly_injector import karisik_veri_seti_uret
 
@@ -112,6 +115,17 @@ def main():
 
     # Tek seferde üret, hem doğrulama hem export bu tek listeyi kullansin
     fatura_nesneleri = karisik_veri_seti_uret(args.count, args.anomali_orani)
+
+
+    # Union (Additive) Etiketleme: üreticinin enjekte ettiği anomali
+    # etiketlerine, doğrulayıcının BAĞIMSIZ tespit ettiği kural ihlallerini
+    # birleştiriyoruz -- böylece bir anomalinin yan etkisi ya da doğal
+    # varyans kaynaklı kural ihlalleri manuel yama gerekmeden etiketlenir.
+    for f in fatura_nesneleri:
+        otonom_turler = kural_ihlali_turlerini_tespit_et(f)
+        if otonom_turler:
+            f.anomali_turleri = list(set(f.anomali_turleri) | otonom_turler)
+            f.is_anomali = True
 
     # VKN-firma tutarsizliklari (ayni ad farkli VKN VEYA ayni VKN farkli ad)
     # JSON/CSV export'a hiç dahil edilmesin -- sadece raporda görünmesi

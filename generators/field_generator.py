@@ -4,7 +4,7 @@ from decimal import Decimal
 from faker import Faker
 from datetime import date, timedelta
 from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu, FirmaTuru, KDV_ORANI_MAP
-import re
+import re, math
 from pathlib import Path
 
 fake = Faker("tr_TR")
@@ -119,78 +119,81 @@ def yemek_urunleri_yukle(dosya_yolu: Path = YEMEK_URUNLERI_CSV) -> list[str]:
                 urunler.append(urun)
     return urunler
 
-def danismanlik_urunleri_yukle(dosya_yolu: Path = DANISMANLIK_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
-    """Danışmanlık harcamaları için hazırlanan temiz CSV'yi okur."""
+def danismanlik_urunleri_yukle(dosya_yolu: Path = DANISMANLIK_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[tuple[str, str | None]]]:
+    """Danışmanlık harcamaları için hazırlanan temiz CSV'yi okur (urun_adi, birim çiftleriyle)."""
     import csv as _csv
-    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    havuzlar: dict[HarcamaKategorisi, list[tuple[str, str | None]]] = {}
     if not dosya_yolu.exists():
         return havuzlar
-        
+
     with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
         reader = _csv.DictReader(f)
         for satir in reader:
             kategori_str = (satir.get("kategori") or "").strip().lower()
             urun = (satir.get("urun_adi") or "").strip()
-            
+            birim = (satir.get("birim") or "").strip() or None
+
             if not kategori_str or not urun:
                 continue
             try:
                 kategori = HarcamaKategorisi(kategori_str)
             except ValueError:
                 continue
-                
-            havuzlar.setdefault(kategori, []).append(urun)
-            
+
+            havuzlar.setdefault(kategori, []).append((urun, birim))
+
     return havuzlar
 
 
-def konaklama_urunleri_yukle(dosya_yolu: Path = KONAKLAMA_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
-    """Konaklama harcamaları için hazırlanan temiz CSV'yi okur."""
+def konaklama_urunleri_yukle(dosya_yolu: Path = KONAKLAMA_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[tuple[str, str | None]]]:
+    """Konaklama harcamaları için hazırlanan temiz CSV'yi okur (urun_adi, birim çiftleriyle)."""
     import csv as _csv
-    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    havuzlar: dict[HarcamaKategorisi, list[tuple[str, str | None]]] = {}
     if not dosya_yolu.exists():
         return havuzlar
-        
+
     with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
         reader = _csv.DictReader(f)
         for satir in reader:
             kategori_str = (satir.get("kategori") or "").strip().lower()
             urun = (satir.get("urun_adi") or "").strip()
-            
+            birim = (satir.get("birim") or "").strip() or None
+
             if not kategori_str or not urun:
                 continue
             try:
                 kategori = HarcamaKategorisi(kategori_str)
             except ValueError:
                 continue
-                
-            havuzlar.setdefault(kategori, []).append(urun)
-            
+
+            havuzlar.setdefault(kategori, []).append((urun, birim))
+
     return havuzlar
 
 
-def ulasim_urunleri_yukle(dosya_yolu: Path = ULASIM_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
-    """Ulaşım harcamaları için hazırlanan temiz CSV'yi okur."""
+def ulasim_urunleri_yukle(dosya_yolu: Path = ULASIM_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[tuple[str, str | None]]]:
+    """Ulaşım harcamaları için hazırlanan temiz CSV'yi okur (urun_adi, birim çiftleriyle)."""
     import csv as _csv
-    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    havuzlar: dict[HarcamaKategorisi, list[tuple[str, str | None]]] = {}
     if not dosya_yolu.exists():
         return havuzlar
-        
+
     with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
         reader = _csv.DictReader(f)
         for satir in reader:
             kategori_str = (satir.get("kategori") or "").strip().lower()
             urun = (satir.get("urun_adi") or "").strip()
-            
+            birim = (satir.get("birim") or "").strip() or None
+
             if not kategori_str or not urun:
                 continue
             try:
                 kategori = HarcamaKategorisi(kategori_str)
             except ValueError:
                 continue
-                
-            havuzlar.setdefault(kategori, []).append(urun)
-            
+
+            havuzlar.setdefault(kategori, []).append((urun, birim))
+
     return havuzlar
 def anomali_urunleri_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
     """
@@ -307,7 +310,58 @@ ACIKLAMA_HAVUZU = {
         "Diğer Hizmet Bedeli",
         "Diğer Market Ürünleri",
     ],
+    HarcamaKategorisi.GIYIM: [
+        "Giyim Ürünü",
+        "Ayakkabı",
+        "Mont",
+        "Pantolon",
+        "Gömlek",
+        "Ceket",
+        "Etek",
+        "Kazak",
+    ],
+    HarcamaKategorisi.KISISEL_BAKIM: [
+        "Şampuan",
+        "Krem",
+        "Makyaj Malzemesi",
+        "Diş Macunu",
+        "Parfüm",
+        "Tıraş Malzemesi",
+    ],
+    HarcamaKategorisi.TEMIZLIK: [
+        "Deterjan",
+        "Temizlik Bezi",
+        "Süpürge",
+        "Temizlik Spreyi",
+        "Bulaşık Makinesi Tableti",
+    ],
+
 }
+
+# Ürün adı -> birim eşlemesi. Sadece birim bilgisi CSV'de VARSA doldurulur
+# (danışmanlık/konaklama/ulaşım gibi el ile hazırlanmış küçük havuzlar).
+# rastgele_kalem, bir aciklama seçtikten SONRA burada karşılığı var mı diye
+# bakar; yoksa eski davranışa (kategori bazlı rastgele birim) düşer.
+URUN_BIRIM_ESLEME: dict[str, str] = {}
+
+
+def _urun_birim_kayitlarini_isle(
+    urunler_by_kategori: dict[HarcamaKategorisi, list[tuple[str, str | None]]]
+) -> dict[HarcamaKategorisi, list[str]]:
+    """
+    (urun_adi, birim) çiftlerinden oluşan yükleyici çıktısını ACIKLAMA_HAVUZU'nun
+    beklediği düz isim listesine çevirir; birim bilgisi varsa global
+    URUN_BIRIM_ESLEME sözlüğüne kaydeder.
+    """
+    sonuc: dict[HarcamaKategorisi, list[str]] = {}
+    for kategori, kayitlar in urunler_by_kategori.items():
+        isimler: list[str] = []
+        for urun_adi, birim in kayitlar:
+            isimler.append(urun_adi)
+            if birim:
+                URUN_BIRIM_ESLEME[urun_adi] = birim
+        sonuc[kategori] = isimler
+    return sonuc
 
 # CSV'lerden gelen ürünlerle havuzu zenginleştir/değiştir (dosya yoksa sabit liste kalır)
 _market_urunleri = market_urunleri_yukle()
@@ -330,20 +384,21 @@ if _yemek_urunleri:
     ACIKLAMA_HAVUZU[HarcamaKategorisi.YEMEK_HIZMETI] = (
         _yemek_urunleri + ACIKLAMA_HAVUZU[HarcamaKategorisi.YEMEK_HIZMETI]
     )
+
 # 1. Danışmanlık Ürünleri
-_danismanlik_urunleri = danismanlik_urunleri_yukle()
+_danismanlik_urunleri = _urun_birim_kayitlarini_isle(danismanlik_urunleri_yukle())
 for kategori, urunler in _danismanlik_urunleri.items():
     if urunler:
         ACIKLAMA_HAVUZU[kategori] = urunler  # Üzerine yaz (ez)
 
 # 2. Konaklama Ürünleri
-_konaklama_urunleri = konaklama_urunleri_yukle()
+_konaklama_urunleri = _urun_birim_kayitlarini_isle(konaklama_urunleri_yukle())
 for kategori, urunler in _konaklama_urunleri.items():
     if urunler:
         ACIKLAMA_HAVUZU[kategori] = urunler  # Üzerine yaz (ez)
 
 # 3. Ulaşım Ürünleri
-_ulasim_urunleri = ulasim_urunleri_yukle()
+_ulasim_urunleri = _urun_birim_kayitlarini_isle(ulasim_urunleri_yukle())
 for kategori, urunler in _ulasim_urunleri.items():
     if urunler:
         # Eğer ulasim.csv içinde kategori HIZMETI ve BIREYSEL diye ayrılmışsa
@@ -367,15 +422,11 @@ for _kategori in (
     if _ekstra:
         ACIKLAMA_HAVUZU[_kategori] = _ekstra
 
-# Bu kategorilerin elle yazılmış havuzu yok / azınlıkta — CSV'den geleni
-# doğrudan ata, yoksa tek satırlık fallback'e düş.
-_SIFIRDAN_HAVUZ_FALLBACK = {
-    HarcamaKategorisi.GIYIM: ["Giyim Ürünü"],
-    HarcamaKategorisi.KISISEL_BAKIM: ["Kişisel Bakım Ürünü"],
-    HarcamaKategorisi.YAZILIM_LISANS: None,   # asagida ayrica ekleniyor (mevcut liste var)
-}
+# CSV'den geleni ata, boş/yoksa ACIKLAMA_HAVUZU'ndaki (artık zenginleştirilmiş)
+# mevcut genel açıklama listesine düş -- ayrı, alakasız tek satırlık
+# fallback listelerine artık gerek yok.
 for _kategori in (HarcamaKategorisi.GIYIM, HarcamaKategorisi.KISISEL_BAKIM):
-    ACIKLAMA_HAVUZU[_kategori] = _temiz_urunler.get(_kategori) or _SIFIRDAN_HAVUZ_FALLBACK[_kategori]
+    ACIKLAMA_HAVUZU[_kategori] = _temiz_urunler.get(_kategori) or ACIKLAMA_HAVUZU[_kategori]
 
 # Market CSV'sindeki KOZMETİK/DETERJAN TEMİZLİK satırlarıyla ilgili
 # havuzları zenginleştir (üzerine yazma, ekle).
@@ -393,7 +444,7 @@ if _market_temizlik:
 
 # TEMIZLIK: artik ayri IsKolu yok, MARKET altinda kullaniliyor. CSV'den
 # geleni ata, yoksa tek satirlik fallback.
-ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK] = _temiz_urunler.get(HarcamaKategorisi.TEMIZLIK) or ["Temizlik Ürünü"]
+ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK] = _temiz_urunler.get(HarcamaKategorisi.TEMIZLIK) or ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK]
 
 # Supermarket etiketiyle gelen TEMEL_GIDA urunleri (temiz_urunler.csv) —
 # market_urunleri.csv'den AYRI tutuluyor, cunku rastgele_kalem'de ikisi
@@ -433,8 +484,13 @@ FIYAT_ARALIGI_DETAYLI = {
     (HarcamaKategorisi.TEMEL_GIDA, "Litre"): (20, 500), # Su/Sütten Zeytinyağina uzanan aralik
     (HarcamaKategorisi.TEMEL_GIDA, "Adet"): (20, 500),
 
-    (HarcamaKategorisi.ULASIM_BIREYSEL, "Km"): (10, 50),
-    (HarcamaKategorisi.ULASIM_HIZMETI, "Km"): (50, 500),
+    (HarcamaKategorisi.ULASIM_BIREYSEL, "Km"): (150, 1750),
+    (HarcamaKategorisi.ULASIM_HIZMETI, "Km"): (250, 3500),
+    (HarcamaKategorisi.ULASIM_HIZMETI, "Ton"): (1000, 35000),
+    (HarcamaKategorisi.ULASIM_BIREYSEL, "Gün"): (800, 3000),
+    (HarcamaKategorisi.ULASIM_BIREYSEL, "Litre"): (50, 3750),
+    (HarcamaKategorisi.ULASIM_BIREYSEL, "Saat"): (100, 1000),
+    (HarcamaKategorisi.KONAKLAMA, "Saat"): (300, 3000),
 
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Adet"): (50, 500),
     (HarcamaKategorisi.OFIS_SARF_MALZEME, "Kutu"): (300, 2500),
@@ -480,8 +536,8 @@ FIYAT_ARALIGI_GENEL = {
 BIRIM_HAVUZU = {
     HarcamaKategorisi.YEMEK_HIZMETI: ["Adet", "Kişi"],
     HarcamaKategorisi.TEMEL_GIDA: ["Kg", "Adet", "Litre"],
-    HarcamaKategorisi.ULASIM_HIZMETI: ["Adet", "Km", "Kg"],
-    HarcamaKategorisi.ULASIM_BIREYSEL: ["Adet", "Km"],
+    HarcamaKategorisi.ULASIM_HIZMETI: ["Adet", "Km", "Kg", "Ton"],
+    HarcamaKategorisi.ULASIM_BIREYSEL: ["Adet", "Km", "Litre", "Gün"],
     HarcamaKategorisi.KONAKLAMA: ["Gece", "Adet"],
     HarcamaKategorisi.OFIS_SARF_MALZEME: ["Adet", "Kutu"],
     HarcamaKategorisi.OFIS_MOBILYA: ["Adet"],
@@ -497,6 +553,31 @@ BIRIM_HAVUZU = {
     HarcamaKategorisi.KISISEL_BAKIM: ["Adet"],
     HarcamaKategorisi.TEMIZLIK: ["Adet"],
 }
+# İş kolu bazlı SEÇİM ağırlığı: her iş kolunun izinli kategorilerindeki
+# toplam açıklama/ürün sayısına göre (log ölçekli) hesaplanır. Amaç:
+# market/teknoloji gibi CSV'den binlerce ürün çekebilen iş kollarının
+# faturalarda AŞIRI baskın olmasını engellerken, danışmanlık/konaklama/
+# ulaşım gibi havuzu çok küçük (20-40 ürün) iş kollarının da GERÇEKÇİ
+# şekilde daha az üretilmesini sağlamak -- küçük havuzda çok sayıda fatura
+# üretilirse ayni açıklamalar defalarca tekrar etmek zorunda kalıyor.
+# log1p kullanılıyor çünkü ham havuz büyüklükleri arasında (23 ile 500.000+
+# arası) devasa fark var; düz orantı diğer TÜM iş kollarını yok sayardı.
+# TABAN_AGIRLIK, en küçük havuzlu iş kolunun bile sıfıra yakın olasılığa
+# düşmemesini garantiler.
+TABAN_AGIRLIK = 1.0
+
+def _is_kolu_agirliklarini_hesapla() -> dict[IsKolu, float]:
+    agirliklar: dict[IsKolu, float] = {}
+    for is_kolu in IsKolu:
+        izinli_kategoriler = IS_KOLU_KATEGORILERI.get(is_kolu, [])
+        toplam_urun = sum(len(ACIKLAMA_HAVUZU.get(k, [])) for k in izinli_kategoriler)
+        agirliklar[is_kolu] = TABAN_AGIRLIK + math.log1p(toplam_urun)
+    return agirliklar
+
+
+IS_KOLU_AGIRLIKLARI = _is_kolu_agirliklarini_hesapla()
+
+
 """
 SEKTOR_KELIME_HAVUZU = {
     HarcamaKategorisi.TEMEL_GIDA: ["Bereket", "Öz", "Tarim", "Gida Pazarlama", "Market"],
@@ -665,7 +746,7 @@ def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
     return f"{ozel_isim} {sektor_kelime} {suffix}"   # isim_once (varsayilan)
 
 # Alici (bizim şirketimiz) sabit kimlik bilgileri — her faturada ayni olmali
-ALICI_VKN_SABIT = rastgele_vkn()
+ALICI_VKN_SABIT = "6463595880"
 ALICI_UNVAN_SABIT = "SOA People"
 
 
@@ -713,7 +794,7 @@ def rastgele_birim_fiyat(kategori: HarcamaKategorisi, birim: str) -> Decimal:
 def kdv_orani_belirle(kategori: HarcamaKategorisi) -> float:
     return KDV_ORANI_MAP[kategori]
 
-TAM_SAYI_BIRIMLERI = {"Adet", "Kutu", "Kişi", "Gece", "Lisans", "Şişe", "Kullanici"}
+TAM_SAYI_BIRIMLERI = {"Adet", "Kutu", "Kişi", "Gece", "Gün", "Lisans", "Şişe", "Kullanici"}
 
 def rastgele_miktar(birim: str) -> float:
     if birim in TAM_SAYI_BIRIMLERI:
@@ -726,7 +807,6 @@ def rastgele_kalem(
     izinli_kategoriler: list[HarcamaKategorisi],
     kullanilan_aciklamalar: set[str],) -> FaturaKalemi:
     kategori = random.choice(izinli_kategoriler)
-    birim = rastgele_birim(kategori)
 
     # Büyük havuzlarda (CSV kaynaklı, binlerce eleman) tekrar filtresi hem
     # gereksiz maliyetli hem de anlamsız (çakışma ihtimali zaten ~0),
@@ -753,6 +833,11 @@ def rastgele_kalem(
                 musait_aciklamalar = havuz
             aciklama = random.choice(musait_aciklamalar)
             kullanilan_aciklamalar.add(aciklama)
+
+    # Aciklama artik belli -- CSV'den gelen urun-birim eslemesinde varsa
+    # onu kullan (gercekci birim), yoksa eski davranisa (kategori bazli
+    # rastgele birim) dus.
+    birim = URUN_BIRIM_ESLEME.get(aciklama) or rastgele_birim(kategori)
 
     return FaturaKalemi(
         kalem_no=kalem_no,
@@ -785,7 +870,11 @@ def rastgele_fatura_no(fatura_tarihi: str) -> str:
 
 
 def rastgele_fatura() -> Fatura:
-    is_kolu = random.choice(list(IsKolu))
+    is_kolu = random.choices(
+        list(IS_KOLU_AGIRLIKLARI.keys()),
+        weights=list(IS_KOLU_AGIRLIKLARI.values()),
+        k=1,
+    )[0]
     izinli_kategoriler = IS_KOLU_KATEGORILERI[is_kolu]
 
     firma_turu = rastgele_firma_turu()             # 1. adim: tür seç (taksonomi)

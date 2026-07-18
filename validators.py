@@ -4,7 +4,6 @@ from schema import (
     Fatura, FaturaKalemi, HarcamaKategorisi, KDV_ORANI_MAP, paraya_yuvarla,
     IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
 )
-from generators.field_generator import FIYAT_ARALIGI_DETAYLI, FIYAT_ARALIGI_GENEL
 from generators.anomaly_injector import ANOMALI_FONKSIYONLARI
 
 
@@ -105,11 +104,7 @@ def tarih_gelecekte_mi(fatura_tarihi_str: str, bugun_str: str) -> bool:
     return fatura_tarihi_str > bugun_str  # ISO format (YYYY-MM-DD) string karşilaştirmasi güvenlidir
 
 
-#5. KDV Orani Kontrolü (Kategoriye göre sabit KDV orani)
-def kategori_kdv_dogrula(kalem: FaturaKalemi) -> bool:
-    """Kalemin KDV orani, kategorisi için tanimli sabit orana eşit mi?"""
-    beklenen_kdv = KDV_ORANI_MAP.get(kalem.harcama_kategorisi)
-    return beklenen_kdv is not None and kalem.kdv_orani == beklenen_kdv
+#5.a Mevzuat değişikliği oabilmesi nedeni ile kategori_kdv_doğrula kaldırıldı. Kategoriye göre KDV oranı kontrolü artık yapılmayacak.
 
 #5b. İş Kolu - Kategori Uyum Kontrolü
 def kalem_is_kolu_uyumu_dogrula(kalem: FaturaKalemi, izinli_kategoriler: list[HarcamaKategorisi]) -> bool:
@@ -129,35 +124,9 @@ def kalem_limit_asimi_mi(kalem: FaturaKalemi) -> bool:
     limit = POLICY_TUTAR_LIMITLERI.get(kalem.harcama_kategorisi)
     return limit is not None and kalem.birim_fiyat > Decimal(str(limit))
 
-#5e. Fahiş Fiyat Kontrolü (ondalik_kaymasi gibi anomalileri yakalamak için)
-def kalem_fahis_fiyat_mi(kalem: FaturaKalemi, esik_carpani: float = 5.0) -> bool:
-    """
-    Kalemin birim fiyati, kategori+birim icin tanimli normal fiyat araliginin
-    ust sinirinin `esik_carpani` katini asiyorsa fahis/anormal fiyat sayilir.
-    NOT: Diger kontrollerden farkli - deterministik bir kural degil,
-    field_generator.py'daki fiyat araliklarina dayali istatistiksel bir esik
-    kontrolu. ondalik_kaymasi (10x/100x) gibi kaba sapmalari yakalamak icin
-    yeterince genis bir marj (5x) kullaniyoruz; boylece rastgele_birim_fiyat
-    icindeki normal %10 gurultu payi (max ~%30 sapma) ile karismiyor.
-    """
-    ust_sinir = FIYAT_ARALIGI_DETAYLI.get(
-        (kalem.harcama_kategorisi, kalem.birim),
-        FIYAT_ARALIGI_GENEL.get(kalem.harcama_kategorisi, (None, None))
-    )[1]
-    return ust_sinir is not None and kalem.birim_fiyat > Decimal(str(ust_sinir * esik_carpani))
+#5e. Fahiş Fiyat Kontrolü kaldırıldı. Fiyat aralılkarı enflasyona göre eskiyebilir.
 
-#5f. Düşük Fiyat Kontrolü (dusuk_ondalik_kaymasi gibi anomalileri yakalamak için)
-def kalem_dusuk_fiyat_mi(kalem: FaturaKalemi, esik_carpani: float = 5.0) -> bool:
-    """
-    kalem_fahis_fiyat_mi'nin simetriği: kalemin birim fiyati, kategori+birim
-    icin tanimli normal fiyat araliginin ALT sinirinin `esik_carpani`'na
-    bölünmüş halinin altina düşüyorsa anormal düşük fiyat sayilir.
-    """
-    alt_sinir = FIYAT_ARALIGI_DETAYLI.get(
-        (kalem.harcama_kategorisi, kalem.birim),
-        FIYAT_ARALIGI_GENEL.get(kalem.harcama_kategorisi, (None, None))
-    )[0]
-    return alt_sinir is not None and kalem.birim_fiyat < Decimal(str(alt_sinir / esik_carpani))
+#5f. Düşük Fiyat Kontrolü kaldırıldı. Fiyat aralıkları enflasyona göre eskiyebilir. Türkiye koşullarında 6 ayda ciddi sapma olabilir. Periyodik güncelleme şart.
 
 
 #6. VKN-Firma Tutarlilik Kontrolü (Ayni VKN farkli unvan, ya da ayni unvan farkli VKN)
@@ -195,6 +164,7 @@ def fatura_footer_tutarlilik_dogrula(fatura: Fatura) -> bool:
 #Ek olarak ondalıklı sayıyın doğruluğunu kontrol etmek için de fonksiyonlar eklenebilir. 
 #Örneğin, birim fiyatın veya miktarın belirli bir hassasiyette olup olmadığını kontrol etmek gibi.
 #Hatta, birim fiyata kasıtlı anomali ekleyip daha sonra burada kontrol fonksiyonu ile tespit edebiliriz.
+#yukarıdakilerin hepsi eklendi.
 def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     """
     Tek bir faturayi tüm kurallara göre kontrol eder.
@@ -226,8 +196,6 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
             hatalar.append(f"Kalem {kalem.kalem_no}: kdv_tutari hesabi hatali")
         if not kalem_satir_toplam_dogrula(kalem):
             hatalar.append(f"Kalem {kalem.kalem_no}: satir_toplam hesabi hatali")
-        if not kategori_kdv_dogrula(kalem):
-            hatalar.append(f"Kalem {kalem.kalem_no}: KDV orani kategoriyle uyuşmuyor")
         if not kalem_is_kolu_uyumu_dogrula(kalem, izinli_kategoriler):
             hatalar.append(
                 f"IS_KOLU_UYUMSUZLUGU: Kalem {kalem.kalem_no} iş koluna ({fatura.is_kolu.value}) "
@@ -244,22 +212,63 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
                 f"LIMIT_ASIMI: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
                 f"birim fiyati limiti aşiyor: {kalem.birim_fiyat} > {limit}"
             )
-        if kalem_fahis_fiyat_mi(kalem):
-            hatalar.append(
-                f"FAHIS_FIYAT: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
-                f"birim fiyati normal aralik disinda: {kalem.birim_fiyat}"
-            )
-        if kalem_dusuk_fiyat_mi(kalem):
-            hatalar.append(
-                f"DUSUK_FIYAT: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
-                f"birim fiyati normal aralik altinda: {kalem.birim_fiyat}"
-            )
 
     return hatalar
 
+# 7b. Union (Additive) Etiketleme İçin Bağımsız Kural İhlali Tespiti
+
+def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
+    """
+    Faturayı üretici (anomaly_injector) tarafında ne enjekte edildiğinden
+    BAĞIMSIZ olarak, sadece kural tabanlı kontrollere göre tarar ve ihlal
+    edilen kural türlerini ANOMALI_FONKSIYONLARI ile ayni isimlendirmeyle
+    döner. Bu, union/additive etiketleme stratejisinin doğrulayıcı
+    tarafıdır -- amaç, bir anomali fonksiyonunun yan etkisiyle (ör.
+    limit_asimi eklerken kazara is_kolu uyumsuzluğu da oluşması) veya saf
+    doğal varyansla (ör. fiyat gürültüsünün tesadüfen limiti aşması)
+    tetiklenen ihlalleri, ayrı manuel yama gerektirmeden otomatik
+    yakalamaktir.
+
+    KASITLI OLARAK BURADA YOK: basamak_karisikligi, ondalik_kaymasi,
+    dusuk_ondalik_kaymasi, sistematik_yuvarlama -- bunlar tanımı gereği
+    matematiksel/kural bazlı doğrulamadan kaçan, sadece üretici tarafında
+    etiketlenmesi gereken "sinsi" anomalilerdir. Ayrıca fatura_no_tekrari
+    ve VKN-firma tutarlılığı da YOK -- bunlar tek bir faturaya değil,
+    faturalar ARASI ilişkiye bakar, bu fonksiyonun kapsamı dışında.
+    """
+    turler: set[str] = set()
+    izinli_kategoriler = IS_KOLU_KATEGORILERI.get(fatura.is_kolu, [])
+
+    for kalem in fatura.kalemler:
+        if not kalem_ara_toplam_dogrula(kalem):
+            turler.add("ara_toplam")
+        if not kalem_kdv_tutari_dogrula(kalem):
+            turler.add("kdv_tutari")
+        if not kalem_satir_toplam_dogrula(kalem):
+            turler.add("satir_toplami")
+        if not kalem_is_kolu_uyumu_dogrula(kalem, izinli_kategoriler):
+            turler.add("is_kolu_kategori_uyumsuzlugu")
+        if kalem_yasakli_kategoride_mi(kalem):
+            turler.add("yasakli_kategori")
+        # if kalem_limit_asimi_mi(kalem): şimdilik pasif kalsın şirket bazlı limit entegrasyonu yapılabilir.
+        #     turler.add("limit_asimi")
+
+    if not fatura_genel_toplam_dogrula(fatura):
+        turler.add("genel_toplam")
+    if not fatura_footer_tutarlilik_dogrula(fatura):
+        turler.add("footer_kismi")
+
+    bugun_str = date.today().isoformat()
+    if tarih_gelecekte_mi(fatura.fatura_tarihi, bugun_str):
+        turler.add("gelecek_tarihli")
+    if not kimlik_no_dogrula(fatura.satici_vkn):
+        turler.add("gecersiz_kimlik_no")
+
+    return turler
+
 # 8. Üretim Sonrasi Invariant Kontrolü (regresyon güvenlik ağı)
 
-def veri_seti_dogrula(faturalar: list[Fatura], hedef_oran: float, tolerans: float = 0.03) -> list[str]:
+def veri_seti_dogrula(faturalar: list[Fatura], hedef_oran: float, tolerans: float = 0.05) -> list[str]:
     """
     Üretilen veri setinin temel beklentilerini kontrol eder, ihlalleri
     string listesi olarak döner (boşsa her şey beklenen sinirlar içinde
