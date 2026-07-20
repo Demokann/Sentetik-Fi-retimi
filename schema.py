@@ -150,7 +150,9 @@ class Fatura(BaseModel):
     kalemler: List[FaturaKalemi]
     is_kolu: IsKolu   # yeni — iş kolu/kategori uyumsuzluğu validasyonu için şart
     is_anomali: bool = False
-    anomali_turleri: List[str] = Field(default_factory=list) 
+    anomali_turleri: List[str] = Field(default_factory=list)
+    aciklama_kategorisi: str = ""   # yeni — ground truth (yeterli/yetersiz/manipulatif/ai_uretimi), JSON export'a (fatura_to_dict) DAHİL EDİLMEZ
+    aciklama_metni: str = ""        # yeni — LLM tarafından doldurulacak, fatura_to_dict'e (model girdisi) dahil edilecek 
 
     @property
     def toplam_vergisiz_tutar(self) -> Decimal:

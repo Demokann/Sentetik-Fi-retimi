@@ -868,6 +868,11 @@ def rastgele_fatura_no(fatura_tarihi: str) -> str:
     sira_no = random.randint(1, 999999999)
     return f"FTR{yil}{sira_no:09d}"   # 09d -> 9 haneye sifirla tamamla
 
+# Gerçek hayatta bir taksi ya da akaryakıt fişinde başka kalem OLMAZ -- fiş
+# tek kalemlidir. rastgele_fatura() bu açiklamalardan biri kalem olarak
+# seçildiğinde, o kalem faturanin TEK kalemi olacak şekilde döngüyü keser.
+TEKIL_ZORUNLU_ACIKLAMALAR = {"Taksi Ücreti", "Yakit Gideri"}
+
 
 def rastgele_fatura() -> Fatura:
     is_kolu = random.choices(
@@ -894,10 +899,15 @@ def rastgele_fatura() -> Fatura:
     kalem_sayisi = random.randint(1, max(1, ust_sinir))      
 
     kullanilan_aciklamalar: set[str] = set()
-    kalemler = [
-        rastgele_kalem(i + 1, izinli_kategoriler, kullanilan_aciklamalar)
-        for i in range(kalem_sayisi)
-    ]
+    kalemler: list[FaturaKalemi] = []
+    for i in range(kalem_sayisi):
+        kalem = rastgele_kalem(i + 1, izinli_kategoriler, kullanilan_aciklamalar)
+        if kalem.aciklama in TEKIL_ZORUNLU_ACIKLAMALAR:
+            # Bu kalem seçildiği an, öncekiler dahil hepsini atip faturayi
+            # TEK kalemli yapiyoruz (taksi/yakit fişi başka kalemle gelmez).
+            kalemler = [kalem.model_copy(update={"kalem_no": 1})]
+            break
+        kalemler.append(kalem)
 
     return Fatura(
         fatura_no=fatura_no,

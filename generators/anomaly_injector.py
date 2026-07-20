@@ -34,15 +34,15 @@ def gecersiz_kimlik_no_anomali_uret(fatura: Fatura) -> Fatura:
 
 
 
-# 3. KDV-Kategori Uyumsuzluğu
+# 3. KDV-Kategori Uyumsuzluğu Mevzuat değişimden ötürü kaldırılması uygun görüldü.
 
-def kdv_kategori_uyumsuzlugu_anomali_uret(fatura: Fatura) -> Fatura:
-    """Rastgele bir kalemin KDV oranini, kategorisi için doğru olmayan bir oranla değiştirir."""
-    kalem = random.choice(fatura.kalemler)
-    dogru_oran = KDV_ORANI_MAP[kalem.harcama_kategorisi]
-    olasi_yanlis_oranlar = [o for o in {1.0, 10.0, 20.0} if o != dogru_oran]
-    kalem.kdv_orani = random.choice(olasi_yanlis_oranlar)
-    return fatura
+# def kdv_kategori_uyumsuzlugu_anomali_uret(fatura: Fatura) -> Fatura:
+#     """Rastgele bir kalemin KDV oranini, kategorisi için doğru olmayan bir oranla değiştirir."""
+#     kalem = random.choice(fatura.kalemler)
+#     dogru_oran = KDV_ORANI_MAP[kalem.harcama_kategorisi]
+#     olasi_yanlis_oranlar = [o for o in {1.0, 10.0, 20.0} if o != dogru_oran]
+#     kalem.kdv_orani = random.choice(olasi_yanlis_oranlar)
+#     return fatura
 
 
 
@@ -364,11 +364,10 @@ def kdv_tutari_anomali_uret(fatura: Fatura) -> Fatura:
 
 
 
-
 ANOMALI_FONKSIYONLARI = {
     "gelecek_tarihli": gelecek_tarihli_anomali_uret,
     "gecersiz_kimlik_no": gecersiz_kimlik_no_anomali_uret,
-    "kdv_kategori_uyumsuzlugu": kdv_kategori_uyumsuzlugu_anomali_uret,
+    #"kdv_kategori_uyumsuzlugu": kdv_kategori_uyumsuzlugu_anomali_uret,
     "is_kolu_kategori_uyumsuzlugu": is_kolu_kategori_uyumsuzlugu_anomali_uret,
     "yasakli_kategori": yasakli_kategori_anomali_uret,
     "limit_asimi": limit_asimi_anomali_uret,

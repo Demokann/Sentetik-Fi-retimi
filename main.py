@@ -8,7 +8,7 @@ from validators import (
 )
 from generators.field_generator import rastgele_fatura
 from generators.anomaly_injector import karisik_veri_seti_uret
-
+from generators.aciklama_uretici import veri_setine_aciklama_kategorisi_ata
 
 
 def fatura_to_dict(fatura) -> dict:
@@ -54,6 +54,7 @@ def etiket_to_dict(fatura) -> dict:
         "fatura_no": fatura.fatura_no,
         "is_anomali": fatura.is_anomali,
         "anomali_turleri": fatura.anomali_turleri,
+        "aciklama_kategorisi": fatura.aciklama_kategorisi,
     }
 
 
@@ -126,6 +127,17 @@ def main():
         if otonom_turler:
             f.anomali_turleri = list(set(f.anomali_turleri) | otonom_turler)
             f.is_anomali = True
+        
+    for f in fatura_nesneleri:
+        otonom_turler = kural_ihlali_turlerini_tespit_et(f)
+        if otonom_turler:
+            f.anomali_turleri = list(set(f.anomali_turleri) | otonom_turler)
+            f.is_anomali = True
+
+    # Açıklama kategorisi ataması, anomali_turleri TAMAMEN belirlendikten
+    # (union etiketleme bittikten) SONRA yapılmalı -- aksi halde
+    # ONCELIK_SIRASI eksik bilgiyle çalışır.
+    veri_setine_aciklama_kategorisi_ata(fatura_nesneleri)
 
     # VKN-firma tutarsizliklari (ayni ad farkli VKN VEYA ayni VKN farkli ad)
     # JSON/CSV export'a hiç dahil edilmesin -- sadece raporda görünmesi
@@ -143,17 +155,23 @@ def main():
         f.satici_unvan for f in fatura_nesneleri
         if "fatura_no_tekrari" in f.anomali_turleri
     }
+    
     vkn_firma_hatalari = vkn_firma_tutarlilik_hatalarini_bul(fatura_nesneleri)
     celiskili_adlar = set(vkn_firma_hatalari["ayni_ad_farkli_vkn"].keys()) - korunan_adlar
     celiskili_vknler = set(vkn_firma_hatalari["ayni_vkn_farkli_ad"].keys()) - korunan_vknler
+    elenen_fatura_sayisi = 0
     if celiskili_adlar or celiskili_vknler:
         once_sayisi = len(fatura_nesneleri)
         fatura_nesneleri = [
             f for f in fatura_nesneleri
             if f.satici_unvan not in celiskili_adlar and f.satici_vkn not in celiskili_vknler
         ]
-        print(f"VKN-firma tutarsizligi nedeniyle elenen fatura sayisi: {once_sayisi - len(fatura_nesneleri)}")
+        elenen_fatura_sayisi = once_sayisi - len(fatura_nesneleri)
+        print(f"VKN-firma tutarsizligi nedeniyle elenen fatura sayisi: {elenen_fatura_sayisi}")
     rapor = dogrulama_raporu_olustur(fatura_nesneleri)
+    rapor["hedef_anomali_orani"] = args.anomali_orani
+    rapor["talep_edilen_fatura_adedi"] = args.count
+    rapor["elenen_fatura_sayisi_vkn_tutarsizlik"] = elenen_fatura_sayisi
     raporu_yazdir(rapor)
 
     faturalar = [fatura_to_dict(f) for f in fatura_nesneleri]

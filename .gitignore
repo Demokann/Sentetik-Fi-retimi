@@ -5,6 +5,9 @@ __pycache__/
 
 .DS_Store
 deneme.py
+aciklamalar.md
+konsol.txt
+
 # data içindeki her şeyi ignore et
 data/*
 
