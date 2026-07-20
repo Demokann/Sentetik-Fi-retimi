@@ -315,125 +315,55 @@ def kdv_tutari_anomali_uret(fatura: Fatura) -> Fatura:
     return fatura
 
 
-def sistematik_yuvarlama_anomali_uret(fatura: Fatura) -> Fatura:
-    """
-    'Skimming' deseni: faturadaki BİRDEN FAZLA kalemin satir_toplam'indan
-    ayni yönde, küçük (kuruş seviyesinde) tutarlar kirpar. Tek kalemde
-    büyük sapma yerine, her kalemde fark edilmesi zor küçük sapmalar
-    birikir — gerçek hayattaki sistematik hile / yuvarlama suistimalini
-    simüle eder.
-    """
-    if len(fatura.kalemler) < 2:
-        # tek kalemli faturada "sistematik" (çoklu) sapma anlamsiz, atla
-        return fatura
-
-    etkilenecek_sayisi = random.randint(2, len(fatura.kalemler))
-    hedef_indexler = random.sample(range(len(fatura.kalemler)), etkilenecek_sayisi)
-
-    # tüm kalemlerde ayni yönde kirpma (hep az gösterme ya da hep fazla gösterme)
-    yon = random.choice([Decimal("0.97"), Decimal("0.98"), Decimal("1.02"), Decimal("1.03")])
-
-    for idx in hedef_indexler:
-        orijinal_kalem = fatura.kalemler[idx]
-        gercek_satir_toplam = orijinal_kalem.satir_toplam
-        # kuruş seviyesinde küçük sapma + hafif rastgelelik
-        carpan = yon + Decimal(str(round(random.uniform(-0.005, 0.005), 4)))
-        sahte_satir_toplam = Decimal(str(round(float(gercek_satir_toplam) * float(carpan), 2)))
-
-        anomalili_kalem = AnomaliliFaturaKalemi(
-            kalem_no=orijinal_kalem.kalem_no,
-            aciklama=orijinal_kalem.aciklama,
-            harcama_kategorisi=orijinal_kalem.harcama_kategorisi,
-            miktar=orijinal_kalem.miktar,
-            birim=orijinal_kalem.birim,
-            birim_fiyat=orijinal_kalem.birim_fiyat,
-            iskonto_orani=orijinal_kalem.iskonto_orani,
-            kdv_orani=orijinal_kalem.kdv_orani,
-            sahte_ara_toplam=getattr(orijinal_kalem, "sahte_ara_toplam", None),
-            sahte_kdv_tutari=getattr(orijinal_kalem, "sahte_kdv_tutari", None),
-            sahte_satir_toplam=sahte_satir_toplam,
-        )
-        fatura.kalemler[idx] = anomalili_kalem
-
-    return fatura
+#Sistematik yuvarlama anomalisi kaldırıldı. Gerçek fişlerde kuruş bazlı yuvarlama zaten olabiliyor. False-positive riski.
 
 
-def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:  #Tespiti ile ilgili validator.py'de ayrıca bir iş kuralı yazılmalı
-    """
-    Veri girişi hatasi (fat-finger) simülasyonu: rastgele bir kalemin
-    birim_fiyat'ini GERÇEKTEN 10x ya da 100x kaydirir. Bu, sahte_* alanlari
-    kullanan diğer anomalilerden farkli — burada 'gerçek' birim_fiyat
-    değişiyor, dolayisiyla ara_toplam/kdv_tutari/satir_toplam hep kendi
-    içinde matematiksel olarak TUTARLI kalir (validators.py'deki hesap
-    kontrollerinin hiçbirini tetiklemez). Yakalanmasi gereken yer, işin
-    doğasi gereği fahiş/anormal birim fiyat tespiti (ayri bir iş kurali/
-    istatistiksel anomali tespiti gerektirir, matematiksel doğrulama değil).
-    """
-    hedef_index = random.randrange(len(fatura.kalemler))
-    kalem = fatura.kalemler[hedef_index]
+# def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:  #Tespiti ile ilgili validator.py'de ayrıca bir iş kuralı yazılmalı
+#     """
+#     Veri girişi hatasi (fat-finger) simülasyonu: rastgele bir kalemin
+#     birim_fiyat'ini GERÇEKTEN 10x ya da 100x kaydirir. Bu, sahte_* alanlari
+#     kullanan diğer anomalilerden farkli — burada 'gerçek' birim_fiyat
+#     değişiyor, dolayisiyla ara_toplam/kdv_tutari/satir_toplam hep kendi
+#     içinde matematiksel olarak TUTARLI kalir (validators.py'deki hesap
+#     kontrollerinin hiçbirini tetiklemez). Yakalanmasi gereken yer, işin
+#     doğasi gereği fahiş/anormal birim fiyat tespiti (ayri bir iş kurali/
+#     istatistiksel anomali tespiti gerektirir, matematiksel doğrulama değil).
+#     Güncelleme: fahis fiyat validasyonları enflasyon ve piyasa fiyat değişkenliği nedeniyle kaldırıldı.
+#     fakat bu anomalinin fat finger senaryosu olması durumu değiştirebilir. Şimdilik dursun fakat yorum satırı olarak
+#     """
+#     hedef_index = random.randrange(len(fatura.kalemler))
+#     kalem = fatura.kalemler[hedef_index]
 
-    kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
-    kalem.birim_fiyat = kalem.birim_fiyat * kayma_carpani
+#     kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
+#     kalem.birim_fiyat = kalem.birim_fiyat * kayma_carpani
 
-    return fatura
+#     return fatura
 
 # 8. Ters Yönlü Ondalık Kaymasi (Fiyat Çok Düşük)
 
-def dusuk_ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
-    """
-    ondalik_kaymasi_anomali_uret'in ters yönü: veri girişi hatasi simülasyonu,
-    ama bu kez fiyat kasitli olarak 10x ya da 100x KÜÇÜLTÜLÜYOR (ör. kuruş/lira
-    karişikliği, ya da ondalik noktasinin yanliş yazilmasi). Diğer matematiksel
-    anomalilerden farkli - gerçek birim_fiyat değişiyor, dolayisiyla kalemin
-    kendi içindeki hesaplar (ara_toplam/kdv_tutari/satir_toplam) tutarli kalir.
-    Tespiti matematiksel doğrulamayla değil, fahiş/anormal düşük fiyat
-    tespitiyle (istatistiksel/iş kurali) yapilmali.
-    """
-    hedef_index = random.randrange(len(fatura.kalemler))
-    kalem = fatura.kalemler[hedef_index]
+# def dusuk_ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
+#     """
+#     ondalik_kaymasi_anomali_uret'in ters yönü: veri girişi hatasi simülasyonu,
+#     ama bu kez fiyat kasitli olarak 10x ya da 100x KÜÇÜLTÜLÜYOR (ör. kuruş/lira
+#     karişikliği, ya da ondalik noktasinin yanliş yazilmasi). Diğer matematiksel
+#     anomalilerden farkli - gerçek birim_fiyat değişiyor, dolayisiyla kalemin
+#     kendi içindeki hesaplar (ara_toplam/kdv_tutari/satir_toplam) tutarli kalir.
+#     Tespiti matematiksel doğrulamayla değil, fahiş/anormal düşük fiyat
+#     tespitiyle (istatistiksel/iş kurali) yapilmali.
+#     """
+#     hedef_index = random.randrange(len(fatura.kalemler))
+#     kalem = fatura.kalemler[hedef_index]
 
-    kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
-    kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat / kayma_carpani)
+#     kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
+#     kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat / kayma_carpani)
 
-    return fatura
+#     return fatura
 
 
-# 9. Basamak/Rakam Karişikliği (Transposition Hatasi)
+# 9. Basamak/Rakam Karişikliği (Transposition Hatasi) kaldırıldı. OCR bu hatanın ayrımını yapamayabilir güven oranı düşük bir anomali olduğundan kaldırıldı.
 
-def basamak_karisikligi_anomali_uret(fatura: Fatura) -> Fatura:
-    """
-    Veri girişi hatasi simülasyonu: birim_fiyat'in tam kisminda BİTİŞİK iki
-    basamağin yerini kasitli olarak değiştirir (ör. 1234.50 -> 1324.50).
-    Büyüklük mertebesi ayni kaldiği için ne matematiksel doğrulama ne de
-    eşik-tabanli fahiş fiyat kontrolü (kalem_fahis_fiyat_mi) bunu yakalar --
-    bilhassa modelin kategori/birim/fiyat ilişkisini daha ince öğrenmesi
-    için tasarlanmiş, tespiti zor bir anomali.
-    """
-    hedef_index = random.randrange(len(fatura.kalemler))
-    kalem = fatura.kalemler[hedef_index]
 
-    tam_kisim, kurus_kisim = f"{kalem.birim_fiyat:.2f}".split(".")
 
-    if len(tam_kisim) < 2:
-        # tek haneli tam kisimda yer değiştirilecek iki basamak yok, atla
-        return fatura
-
-    basamaklar = list(tam_kisim)
-    pozisyon = random.randint(0, len(basamaklar) - 2)
-    basamaklar[pozisyon], basamaklar[pozisyon + 1] = basamaklar[pozisyon + 1], basamaklar[pozisyon]
-
-    # baştaki basamak 0'a düşerse (ör. "0234") anlamsizlaşir, geri al
-    if basamaklar[0] == "0":
-        return fatura
-
-    yeni_fiyat = Decimal(f"{''.join(basamaklar)}.{kurus_kisim}")
-
-    if yeni_fiyat == kalem.birim_fiyat:
-        # basamaklar ayni olduğu için (ör. "11" -> "11") fark oluşmadi, atla
-        return fatura
-
-    kalem.birim_fiyat = yeni_fiyat
-    return fatura
 
 ANOMALI_FONKSIYONLARI = {
     "gelecek_tarihli": gelecek_tarihli_anomali_uret,
@@ -445,10 +375,10 @@ ANOMALI_FONKSIYONLARI = {
     "ara_toplam": ara_toplam_anomali_uret,
     "kdv_tutari": kdv_tutari_anomali_uret,
     "satir_toplami": satir_toplami_anomali_uret,
-    "sistematik_yuvarlama": sistematik_yuvarlama_anomali_uret,
-    "ondalik_kaymasi": ondalik_kaymasi_anomali_uret,
-    "dusuk_ondalik_kaymasi": dusuk_ondalik_kaymasi_anomali_uret,   # yeni
-    "basamak_karisikligi": basamak_karisikligi_anomali_uret,       # yeni
+
+    # "ondalik_kaymasi": ondalik_kaymasi_anomali_uret,
+    # "dusuk_ondalik_kaymasi": dusuk_ondalik_kaymasi_anomali_uret,   # yeni
+
     "genel_toplam": genel_toplam_anomali_uret,
     "footer_kismi": footer_kismi_anomali_uret,
     # fatura_no_tekrari burada YOK: iki fatura arasinda çalişiyor, ayri ele aliniyor
@@ -538,8 +468,7 @@ if __name__ == "__main__":
         ("ara_toplam", ara_toplam_anomali_uret),
         ("kdv_tutari", kdv_tutari_anomali_uret),
         ("satir_toplami", satir_toplami_anomali_uret),
-        ("sistematik_yuvarlama", sistematik_yuvarlama_anomali_uret),
-        ("ondalik_kaymasi", ondalik_kaymasi_anomali_uret),
+        # ("ondalik_kaymasi", ondalik_kaymasi_anomali_uret),
         ("genel_toplam", genel_toplam_anomali_uret),
         ("footer_kismi", footer_kismi_anomali_uret),
     ]

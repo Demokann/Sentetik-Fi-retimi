@@ -18,5 +18,4 @@ data/*
 !data/hizmet_verileri/*.csv
 !data/anomali_verileri/*.csv
 
-/UBLTR_1.2.1_Paketi
 /rapor_analiz.py
