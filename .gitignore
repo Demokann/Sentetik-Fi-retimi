@@ -12,6 +12,10 @@ aciklamalar2.5.md
 aciklamalar3.md
 aciklamalar3.1.md
 konsol.txt
+aciklama_claude.py
+aciklama_gemini.py
+gemma3_sonuclar.md
+qwen3:8_sonuclar.md
 
 # data içindeki her şeyi ignore et
 data/*
