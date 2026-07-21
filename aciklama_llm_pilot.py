@@ -30,6 +30,12 @@ def yasakli_kalem_bul(kalemler: list[dict]) -> dict | None:
 
 _UNVAN_EKLERI_REGEX = r"\b(A\.Ş\.|Ltd\.\s*Şti\.|Tic\.|San\.|ve|Paz\.|Turizm|Nak\.|Otelcilik|Danişmanlik|Prodüksiyon|Konfeksiyon|Kozmetik|Global|İç|Diş|Ticaret|Sanayi|Taş\.)(?=\s|$)"
 
+# Firma unvanindaki hukuki ek/suffix'leri temizler -- LLM'e "Yilmaz Gida San.
+# ve Tic. Ltd. Şti." yerine "Yilmaz Gida" gibi konuşma diline yakin bir isim
+# vermek icin (field_generator.py:IS_KOLU_SUFFIX ile SENKRON tutulmali).
+_UNVAN_EKLERI_REGEX = r"\b(A\.Ş\.|Ltd\.\s*Şti\.|Tic\.|San\.|ve|Paz\.|Turizm|Nak\.|Otelcilik|Danişmanlik|Prodüksiyon|Konfeksiyon|Kozmetik|Global|İç|Diş|Ticaret|Sanayi|Taş\.)(?=\s|$)"
+
+
 def firma_adi_kisalt(unvan: str) -> str:
     kisa = re.sub(_UNVAN_EKLERI_REGEX, "", unvan)
     kisa = re.sub(r"\s+", " ", kisa).strip(" .,-")
@@ -79,6 +85,7 @@ def prompt_olustur(fatura: dict, kategori: str) -> tuple[str, str]:
             f"'temin edilmiştir' gibi resmi/pasif kalıpları KULLANMA, 'aldım', 'ödedim' gibi aktif fiiller kullan. "
             f"Tek cümle, 40-90 karakter arası. Sadece açıklama metnini yaz."
         )
+        
     elif kategori == "yetersiz":
         talimat = (
             "Açıklama MUĞLAK ve genel olsun, spesifik detay VERME. Firma adını istersen kullanabilirsin "
