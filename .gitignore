@@ -16,9 +16,7 @@ konsol.txt
 # data içindeki her şeyi ignore et
 data/*
 
-#fatura verilerini dahil et
-!data/faturalar.json
-!data/faturalar_etiketler.json
+
 # belirli klasörleri dahil et
 !data/urun_verileri/
 !data/hizmet_verileri/
