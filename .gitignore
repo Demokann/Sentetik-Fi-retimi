@@ -6,11 +6,19 @@ __pycache__/
 .DS_Store
 deneme.py
 aciklamalar.md
+konsol2.5.txt
+konsol3.txt
+aciklamalar2.5.md
+aciklamalar3.md
+aciklamalar3.1.md
 konsol.txt
 
 # data içindeki her şeyi ignore et
 data/*
 
+#fatura verilerini dahil et
+!data/faturalar.json
+!data/faturalar_etiketler.json
 # belirli klasörleri dahil et
 !data/urun_verileri/
 !data/hizmet_verileri/
