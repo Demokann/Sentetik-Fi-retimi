@@ -249,8 +249,23 @@ MANIPULATIF_VURGU_IPUCLARI = [
     "Hiç kuşkusuz iş amaçlı",
     "Kesinlikle şirket gideri",
     "Tümüyle iş için",
+    # 'kesinlikle/yüzde yüz/tamamen' aşırı tekrar ediyordu -> emphatic ifadeyi çeşitlendir
+    # (aynı zamanda 'kelime = manipulatif' sahte sinyalini de zayıflatır).
+    "Hiç tartışmasız iş için",
+    "Net biçimde işle ilgili",
+    "Gönül rahatlığıyla iş amaçlı",
+    "Baştan sona iş kapsamında",
+    "Her açıdan işe dönük",
+    "Eksiksiz biçimde proje için",
+    "Şüpheye yer yok, iş amaçlı",
+    "Bal gibi iş gideri",
 ]
-_VURGU_ANAHTARLARI = ("kesinlikle", "yuzde yuz", "tamamen is", "tumuyle is", "suphesiz", "kuskusuz")
+# Genel emphatic-marker fallback (atanan vurgu paraphrase edilse de yakalansın).
+_VURGU_ANAHTARLARI = (
+    "kesinlikle", "yuzde yuz", "tamamen", "tumuyle", "suphesiz", "kuskusuz",
+    "tartismasiz", "eksiksiz", "gonul rahat", "bastan sona", "her acidan",
+    "net bicimde", "supheye yer", "bal gibi",
+)
 
 # Vurgunun cümledeki KONUMU rastgele seçilir: menü ("başa/ortaya/sona") verilince
 # model hep başa koyuyordu -> eğitimde sahte konumsal sinyal. Tek somut slot dayatmak
@@ -415,10 +430,10 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
             meta["vurgu_konum"] = konum
             talimat = (
                 f"KARAKTER: MANİPÜLATİF çalışan. Masraf aslında normal ama sen bunu abartılı ve gereksiz "
-                f"savunmacı yaz. Sanki suçluluk duyuyormuşsun gibi 'kesinlikle yüzde yüz işle alakalıdır', "
-                f"'tamamen proje içindir' diye ikna etmeye çalış; '{vurgu}' gibi abartılı bir vurguyu {konum} "
-                f"yerleştir. Bu bir YETERLİ not DEĞİL: sakin değilsin, gereğinden fazla ısrarcısın. "
-                f"Kusur/aykırılık/prosedürden bahsetme. Sadece açıklama metnini yaz."
+                f"savunmacı yaz; sanki suçluluk duyuyormuşsun gibi ikna etmeye çalış. '{vurgu}' gibi abartılı "
+                f"bir vurguyu {konum} yerleştir ama KENDİ cümlenle kur, ezber kalıbı ('yüzde yüz işle "
+                f"alakalıdır' gibi) aynen tekrarlama. Bu bir YETERLİ not DEĞİL: sakin değilsin, gereğinden "
+                f"fazla ısrarcısın. Kusur/aykırılık/prosedürden bahsetme. Sadece açıklama metnini yaz."
             )
         else:
             # KURNAZ dal: abartılı vurgu YOK; sıradan masrafı gereksiz-kurumsal bir kılıfla önemli
@@ -434,13 +449,14 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
             )
     else:  # ai_uretimi
         kapanis = random.choice(AI_URETIMI_KAPANIS_IPUCLARI)
+        acilis = random.choice(AI_URETIMI_ACILIS_IPUCLARI)
         meta["kapanis"] = kapanis
         talimat = (
             "KARAKTER: AI_URETIMI (tek istisna). İnsan değil, ChatGPT gibi bir yapay zeka gibi yaz: duygusuz, "
-            "aşırı resmi, 'belirtilen fiş kapsamında gerçekleştirilen harcamalar...' tipi tipik yapay zeka "
-            "şablonu üret. Diğer üçünün aksine doğallık ARANMIYOR; bariz yapay/robotik dursun. Kısa tek cümle "
-            f"de olur, resmi 1-2 cümle de -- 3+ cümlelik paragraf yazma. '...{kapanis}' ifadesini (genelde "
-            f"sonda) kullan. Satıcı/firma adını ASLA kullanma."
+            "aşırı resmi, kalıpsal/şablon. Diğer üçünün aksine doğallık ARANMIYOR; bariz yapay/robotik dursun. "
+            f"Cümleye '{acilis}' gibi bir açılışla başla ve '...{kapanis}' ifadesiyle bitir; verilen açılış/"
+            f"kapanışı KULLAN, hep aynı kalıbı ('Belirtilen fiş...') tekrarlama. Kısa tek cümle de olur, resmi "
+            f"1-2 cümle de -- 3+ cümlelik paragraf yazma. Satıcı/firma adını ASLA kullanma."
         )
 
     # Few-shot SADECE user prompt'a girer (system prompt sabit -> Ollama önbelleği
@@ -722,10 +738,15 @@ def _kapanis_var_mi_herhangi(metin: str) -> bool:
     return any(k.lower() in normalize for k in AI_URETIMI_KAPANIS_IPUCLARI)
 
 
-def _vurgu_var_mi(metin: str) -> bool:
+def _vurgu_var_mi(metin: str, vurgu: str | None = None) -> bool:
     """manipulatif 'aşırı haklı çıkarma' metninde abartılı vurgu işareti var mı?
-    (Türkçe normalize edilmiş anahtarlardan herhangi biri geçiyorsa var sayılır.)"""
+    Önce ATANAN vurgunun ayırt edici kelimeleri aranır (havuz genişledikçe kural
+    otomatik uyum sağlar), sonra genel emphatic-marker fallback denetlenir."""
     n = _tr_normalize(metin)
+    if vurgu:
+        vurgu_kok = [_tr_normalize(w) for w in vurgu.split() if len(w) > 3]
+        if vurgu_kok and any(k in n for k in vurgu_kok):
+            return True
     return any(anahtar in n for anahtar in _VURGU_ANAHTARLARI)
 
 
@@ -854,7 +875,7 @@ def ihlalleri_bul(metin: str, kategori: str, fatura: dict, meta: dict | None = N
         if gizlenecek and _sizinti_var_mi(metin, gizlenecek):
             ihlaller.append("sizinti")
         # "aşırı haklı çıkarma" dalında (meta["vurgu"] varsa) zorunlu vurgu var mı?
-        if meta.get("vurgu") and not _vurgu_var_mi(metin):
+        if meta.get("vurgu") and not _vurgu_var_mi(metin, meta.get("vurgu")):
             ihlaller.append("vurgu_eksik")
         # Faz 2: kılıfı bozup ihlali itiraf/prosedür anlatma -> manipülatif niyeti bozar.
         if _karakter_kirilmasi_mi(metin):
