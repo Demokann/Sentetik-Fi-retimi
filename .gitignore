@@ -19,6 +19,15 @@ qwen3:8_sonuclar.md
 simüle_edilmek_istenen.md
 deneme_20.md
 CLAUDE.md
+faz1_sonu.md
+faz2_sonu.md
+faz3_sonu.md
+faz4_sonu.md
+faz5_sonu.md
+faz6_sonu.md
+ollama_sonuclar.md
+whaatif.py
+deneme_80.md
 # data içindeki her şeyi ignore et
 data/*
 

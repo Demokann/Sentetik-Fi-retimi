@@ -16,8 +16,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from aciklama_uretim_core import (
     OLLAMA_HOST_VARSAYILAN,
     MODEL_VARSAYILAN,
+    KATEGORILER,
     kalemler_ozetle,
     tek_fatura_isleme,
+    yakin_kopya_mi,
+    _token_set,
+    distinct_n,
 )
 
 
@@ -26,6 +30,8 @@ def main():
     parser.add_argument("--input-json", required=True, help="faturalar.json yolu")
     parser.add_argument("--etiket-json", required=True, help="faturalar_etiketler.json yolu")
     parser.add_argument("--output-md", default="ollama_sonuclar.md", help="Çıktının yazılacağı Markdown dosyası")
+    parser.add_argument("--output-jsonl", default=None,
+                        help="Makine-okur kayıtlar (aciklama_analiz.py için). Runner çıktısıyla aynı şema.")
     parser.add_argument("--limit", type=int, default=200, help="Toplam işlenecek fatura sayisi (üst sinir)")
     parser.add_argument("--per-kategori", type=int, default=50, help="Her kategoriden örnek")
     parser.add_argument("--workers", type=int, default=2, help="Paralel istek sayısı (OLLAMA_NUM_PARALLEL'dan büyük olması faydasız)")
@@ -68,13 +74,27 @@ def main():
     islenen = 0
     retry_tetiklendi = 0
     retry_sonrasi_hala_ihlalli = 0
+    # Çeşitlilik/dedup ölçümü (kategori-içi birikir).
+    kabul_token_setleri: dict[str, list[set[str]]] = {k: [] for k in KATEGORILER}
+    kategori_metinleri: dict[str, list[str]] = {k: [] for k in KATEGORILER}
+    yakin_kopya_sayaci = 0
 
     UYARI_METINLERI = {
         "sizinti": "⚠️ SIZINTI: gerçek kategori/ürün adı açıklamada geçiyor.",
         "pasif_kalip": "⚠️ PASIF KALIP: yasaklı resmi/pasif ifade var.",
         "kapanis_eksik": "⚠️ KAPANIS: ai_uretimi bir AI-kapanışıyla bitmiyor.",
         "vurgu_eksik": "⚠️ VURGU: manipulatif abartılı vurgu içermiyor (meşru gibi).",
+        "red": "⚠️ RED: model üretmeyi reddetti (moderasyon refleksi).",
+        "karakter_kirilmasi": "⚠️ KIRILMA: manipulatif kılıfı bozup ihlali itiraf etti.",
+        "yeterli_halusinasyon": "⚠️ HALÜSİNASYON: fişte olmayan tema (yemek vb.) uyduruldu.",
+        "yeterli_dayanaksiz": "⚠️ DAYANAKSIZ: gerçek kalem/firma/iş-amacı çıpası yok (muğlak).",
+        "enum_sizinti": "⚠️ ENUM SIZINTI: ham kategori adı (alt çizgili) açıklamada.",
+        "meta_sizinti": "⚠️ META SIZINTI: rol bırakıldı, görev/fiş betimlendi.",
+        "verbatim_kopya": "⚠️ VERBATIM: few-shot örneği neredeyse birebir kopyalandı.",
+        "urun_detay_kopya": "⚠️ ÜRÜN DETAY: ham ürün detayı (500Ml/4'lü vb.) — insan sadeleştirir.",
     }
+
+    jsonl_dosya = open(args.output_jsonl, "w", encoding="utf-8") if args.output_jsonl else None
 
     # Çıktı dosyasını yazma modunda aç (Baştan başlar, öncekini ezer)
     with open(args.output_md, "w", encoding="utf-8") as out_file:
@@ -99,6 +119,27 @@ def main():
                 uyari_parcalari = [UYARI_METINLERI[i] for i in ihlaller if i in UYARI_METINLERI]
                 if "uzunluk" in ihlaller:
                     uyari_parcalari.append(f"⚠️ UZUNLUK DİKKAT: {len(metin)} karakter.")
+
+                # Dedup işaretle (pilot bir test aracı; düşürmeyip görünür kılıyoruz).
+                dedup_esik = 0.95 if kategori == "yetersiz" else 0.8
+                yakin = yakin_kopya_mi(metin, kabul_token_setleri.get(kategori, []), dedup_esik)
+                if yakin:
+                    yakin_kopya_sayaci += 1
+                    uyari_parcalari.append("♊ YAKIN-KOPYA: aynı kategoride çok benzer üretim.")
+                if kategori in kabul_token_setleri:
+                    kabul_token_setleri[kategori].append(_token_set(metin))
+                    kategori_metinleri[kategori].append(metin)
+
+                if jsonl_dosya:
+                    jsonl_dosya.write(json.dumps({
+                        "fatura_no": fatura["fatura_no"],
+                        "aciklama_metni": metin,
+                        "aciklama_kategorisi": kategori,
+                        "deneme_sayisi": deneme_sayisi,
+                        "kalan_ihlaller": ihlaller,
+                        "yakin_kopya": yakin,
+                    }, ensure_ascii=False) + "\n")
+                    jsonl_dosya.flush()
 
                 if deneme_sayisi == 2:
                     retry_tetiklendi += 1
@@ -128,6 +169,10 @@ def main():
                 print(f"[✔] İşlenen: {idx}/{len(islenecek_liste)} | Fatura: {fatura['fatura_no']} ({kategori})")
                 islenen += 1
 
+    if jsonl_dosya:
+        jsonl_dosya.close()
+        print(f"[+] Makine-okur kayıtlar: '{args.output_jsonl}' (analiz: python aciklama_analiz.py --girdi {args.output_jsonl})")
+
     # Süre Hesaplama
     bitis_zamani = time.time()
     gecen_sure = bitis_zamani - baslangic_zamani
@@ -136,6 +181,14 @@ def main():
     print(f"\nİşlem başarıyla bitti.")
     print(f"Toplam İşlenen Fatura: {islenen}")
     print(f"Retry Tetiklenen: {retry_tetiklendi} (bunlardan {retry_sonrasi_hala_ihlalli} tanesi 2. denemede de ihlalli kaldı)")
+    print(f"Yakın-kopya işaretlenen: {yakin_kopya_sayaci}")
+    print("Çeşitlilik (distinct-1 / distinct-2, 1'e yakın = çeşitli):")
+    for kat in KATEGORILER:
+        metinler = kategori_metinleri.get(kat, [])
+        if not metinler:
+            continue
+        print(f"  {kat:12s} n={len(metinler):4d} | distinct-1={distinct_n(metinler, 1):.3f} "
+              f"distinct-2={distinct_n(metinler, 2):.3f}")
     print(f"Harcanan Toplam Süre: {int(dakika)} dakika {int(saniye)} saniye")
     print(f"Sonuçları görüntülemek için '{args.output_md}' dosyasına bakabilirsin.\n")
 

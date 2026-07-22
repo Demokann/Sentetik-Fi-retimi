@@ -19,8 +19,12 @@ from pathlib import Path
 from aciklama_uretim_core import (
     OLLAMA_HOST_VARSAYILAN,
     MODEL_VARSAYILAN,
+    KATEGORILER,
     tek_fatura_isleme,
     modeli_bellekten_indir,
+    yakin_kopya_mi,
+    _token_set,
+    distinct_n,
 )
 
 VARSAYILAN_CIKTI_DIZINI = "data/aciklama"
@@ -83,6 +87,12 @@ def main():
     genel_hala_ihlalli = 0
     genel_kategori = Counter()
     islenen_batch = 0
+    # Çeşitlilik/dedup ölçümü (run boyunca kategori-içi birikir). Yakın-kopya
+    # ÇIKTIYI DÜŞÜRMEZ (resumability + her faturaya açıklama garantisi bozulmasın)
+    # -- sadece kayda 'yakin_kopya' bayrağı basar ve raporda görünür kılar.
+    kabul_token_setleri: dict[str, list[set[str]]] = {k: [] for k in KATEGORILER}
+    kategori_metinleri: dict[str, list[str]] = {k: [] for k in KATEGORILER}
+    yakin_kopya_sayaci = 0
     # Model burst boyunca bellekte kalsın; cooldown başında explicit indireceğiz.
     keep_alive = f"{int(args.cooldown_min * 60) + 300}s"
 
@@ -99,6 +109,14 @@ def main():
             faturalar = json.load(f)
 
         cikti = cikti_yukle(cikti_yolu)  # resumability: bitmişleri atla
+        # Resume: bu batch'te daha önce üretilenleri dedup birikimine kat ki
+        # yakın-kopya bayrağı tutarlı kalsın.
+        for _k in cikti.values():
+            _kat = _k.get("aciklama_kategorisi")
+            _m = _k.get("aciklama_metni")
+            if _kat in kabul_token_setleri and _m:
+                kabul_token_setleri[_kat].append(_token_set(_m))
+                kategori_metinleri[_kat].append(_m)
         kalanlar = [f for f in faturalar if f["fatura_no"] not in cikti]
 
         print(f"=== {batch['dosya']}: {len(faturalar)} fatura, {len(cikti)} zaten üretilmiş, {len(kalanlar)} kaldı ===")
@@ -128,11 +146,23 @@ def main():
                         print(f"    [X] {fno} - HATA: {hata or 'Metin boş'}")
                         continue
 
+                    # Dedup: aynı kategoride kabul edilenlere çok benziyorsa
+                    # işaretle (düşürme). yetersiz'de tekrar doğal ('iş gideri'
+                    # vb.) -> eşik daha gevşek.
+                    dedup_esik = 0.95 if kategori == "yetersiz" else 0.8
+                    yakin = yakin_kopya_mi(metin, kabul_token_setleri.get(kategori, []), dedup_esik)
+                    if yakin:
+                        yakin_kopya_sayaci += 1
+                    if kategori in kabul_token_setleri:
+                        kabul_token_setleri[kategori].append(_token_set(metin))
+                        kategori_metinleri[kategori].append(metin)
+
                     cikti[fno] = {
                         "aciklama_metni": metin,
                         "aciklama_kategorisi": kategori,
                         "deneme_sayisi": deneme_sayisi,
                         "kalan_ihlaller": ihlaller,
+                        "yakin_kopya": yakin,
                     }
                     genel_uretilen += 1
                     genel_kategori[kategori] += 1
@@ -179,6 +209,14 @@ def main():
     print(f"Bu koşuda üretilen açıklama: {genel_uretilen}")
     print(f"Retry tetiklenen: {genel_retry} (bunlardan {genel_hala_ihlalli} tanesi 2. denemede de ihlalli)")
     print(f"Kategori dağılımı: {dict(genel_kategori)}")
+    print(f"Yakın-kopya işaretlenen (düşürülmedi): {yakin_kopya_sayaci}")
+    print("Çeşitlilik (distinct-1 / distinct-2, 1'e yakın = çeşitli):")
+    for kat in KATEGORILER:
+        metinler = kategori_metinleri.get(kat, [])
+        if not metinler:
+            continue
+        print(f"  {kat:12s} n={len(metinler):5d} | distinct-1={distinct_n(metinler, 1):.3f} "
+              f"distinct-2={distinct_n(metinler, 2):.3f}")
     print(f"Kalan batch sayısı: {kalan_toplam}")
     print(f"Geçen süre (cooldown dahil): {int(dk)} dk {int(sn)} sn")
     if kalan_toplam == 0:

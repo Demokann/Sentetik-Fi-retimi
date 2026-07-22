@@ -366,8 +366,6 @@ def _urun_birim_kayitlarini_isle(
 # CSV'lerden gelen ürünlerle havuzu zenginleştir/değiştir (dosya yoksa sabit liste kalır)
 _market_urunleri = market_urunleri_yukle()
 
-_market_urunleri = market_urunleri_yukle()
-
 TEMEL_GIDA_MARKET_HAVUZU = (
     _market_urunleri.get(HarcamaKategorisi.TEMEL_GIDA)
     or ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMEL_GIDA]
@@ -611,12 +609,57 @@ IS_KOLU_SEKTOR_KELIME = {
     IsKolu.TEKNOLOJI: ["Yazilim", "Teknoloji", "Bilişim"],
     IsKolu.DANISMANLIK_FIRMASI: ["Danişmanlik", "Consulting", "Denetim"],
     IsKolu.LOJISTIK_FIRMASI: ["Lojistik", "Nakliyat", "Kargo"],
-    IsKolu.ULASIM_SAGLAYICI: ["Taksi", "Otogar", "Akaryakit", "Rent A Car"],
-    IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
+    # Ulaşım sektör kelimeleri hizmete ÖZEL (Taksi/Akaryakit/Rent A Car) ya da
+    # JENERİK (Turizm/Seyahat/Ulaşım). Özel olanlar yalnız fişte ilgili kalem varsa
+    # firma adına girer (bkz. SEKTOR_KELIME_KALEM_KOSULU); jenerikler her zaman uygun.
+    IsKolu.ULASIM_SAGLAYICI: ["Taksi", "Otogar", "Akaryakit", "Rent A Car",
+                              "Turizm", "Seyahat", "Ulaşım"],
     IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
     IsKolu.GIYIM_MAGAZASI: ["Tekstil", "Giyim", "Moda"],   # yeni
     IsKolu.KISISEL_BAKIM: ["Kozmetik", "Bakım", "Güzellik"],
 }
+
+# Bir sektör kelimesi firma adına ancak fişteki kalemlerden biri ilgili anahtar
+# kelimeyi içeriyorsa girebilir (ör. 'Taksi' yalnız faturada taksi kalemi varsa).
+# Burada OLMAYAN sektör kelimeleri jeneriktir, her zaman uygundur.
+SEKTOR_KELIME_KALEM_KOSULU = {
+    "Taksi": ("taksi",),
+    "Akaryakit": ("akaryakit", "yakit", "benzin", "motorin"),
+    "Rent A Car": ("arac kiralama", "rent a car", "kiralama"),
+    "Otogar": ("otobus", "otogar", "sehirlerarasi"),
+}
+
+
+def _ascii_kucuk(metin: str) -> str:
+    """Türkçe metni ASCII küçük harfe indirger (kalem adı ile anahtar kelime
+    eşleşmesini diakritik farkına takılmadan yapmak için)."""
+    metin = metin.replace("İ", "i").replace("I", "ı").lower()
+    return metin.translate(str.maketrans("ğüşıöç", "gusioc"))
+
+
+def _sektor_kelime_sec(is_kolu: IsKolu, kalemler=None) -> str:
+    """İş koluna uygun sektör kelimesini, fişteki kalemlerle TUTARLI olacak şekilde
+    seçer. Hizmete özel kelimeler (Taksi vb.) yalnız ilgili kalem varsa aday olur;
+    eşleşen özel kelime, jeneriklere göre daha yüksek olasılıkla seçilir."""
+    adaylar = IS_KOLU_SEKTOR_KELIME[is_kolu]
+    kalem_metni = _ascii_kucuk(" ".join(getattr(k, "aciklama", "") for k in (kalemler or [])))
+    uygun: list[str] = []
+    agirlik: list[int] = []
+    for kelime in adaylar:
+        kosul = SEKTOR_KELIME_KALEM_KOSULU.get(kelime)
+        if kosul is None:
+            uygun.append(kelime)       # jenerik -> her zaman uygun
+            agirlik.append(1)
+        elif kalem_metni and any(a in kalem_metni for a in kosul):
+            uygun.append(kelime)       # özel ama fişte gerçekten var
+            agirlik.append(3)          # tutarlı özel kelimeyi öne çıkar
+    if not uygun:
+        # Hiç uygun yok (ör. ulaşım firması ama fişte yalnız 'Uçak Bileti'):
+        # koşullu olmayan (jenerik) kelimelere düş; o da yoksa ilk adaya.
+        jenerikler = [k for k in adaylar if k not in SEKTOR_KELIME_KALEM_KOSULU]
+        return random.choice(jenerikler) if jenerikler else adaylar[0]
+    return random.choices(uygun, weights=agirlik, k=1)[0]
+
 """SUFFIX_HAVUZU = ["Ltd. Şti.", "A.Ş.", "Tic. Ltd. Şti."] """
 
 IS_KOLU_SUFFIX = {
@@ -717,11 +760,13 @@ def rastgele_kimlik_no(firma_turu: FirmaTuru) -> str:
         return rastgele_tckn()
     return rastgele_vkn()
 
-def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru) -> str:
+def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru, kalemler=None) -> str:
     if firma_turu == FirmaTuru.SAHIS_SIRKETI:
         return fake.name()
 
-    sektor_kelime = random.choice(IS_KOLU_SEKTOR_KELIME[is_kolu])
+    # Sektör kelimesi fişteki kalemlerle tutarlı seçilir (ör. 'Taksi' yalnız
+    # faturada taksi kalemi varsa). kalemler verilmezse jeneriklere düşülür.
+    sektor_kelime = _sektor_kelime_sec(is_kolu, kalemler)
     suffix = random.choice(IS_KOLU_SUFFIX[is_kolu])
     ozel_isim = rastgele_soyisim()
 
@@ -883,12 +928,11 @@ def rastgele_fatura() -> Fatura:
     izinli_kategoriler = IS_KOLU_KATEGORILERI[is_kolu]
 
     firma_turu = rastgele_firma_turu()             # 1. adim: tür seç (taksonomi)
-    satici_adi = rastgele_firma_adi(is_kolu, firma_turu)   # 2. adim: isim üret
-    satici_kimlik = rastgele_kimlik_no(firma_turu)         #3. adim: kimlik no üret
+    satici_kimlik = rastgele_kimlik_no(firma_turu)         # 2. adim: kimlik no üret
 
-    fatura_tarihi = rastgele_tarih()        
+    fatura_tarihi = rastgele_tarih()
     fatura_no = rastgele_fatura_no(fatura_tarihi)
-    
+
     # Bu iş kolunda toplam kaç benzersiz açiklama üretilebilir? artık csv dosyalarından verileri çekildiği için bu gereksiz olabilir
     toplam_musait_aciklama = sum(
         len(ACIKLAMA_HAVUZU[kategori]) for kategori in izinli_kategoriler
@@ -896,7 +940,7 @@ def rastgele_fatura() -> Fatura:
 
     # Kalem sayisi, mevcut çeşitliliği aşmasin (en fazla 8, ama havuz küçükse ona göre kisitla)
     ust_sinir = min(8, toplam_musait_aciklama)
-    kalem_sayisi = random.randint(1, max(1, ust_sinir))      
+    kalem_sayisi = random.randint(1, max(1, ust_sinir))
 
     kullanilan_aciklamalar: set[str] = set()
     kalemler: list[FaturaKalemi] = []
@@ -908,6 +952,10 @@ def rastgele_fatura() -> Fatura:
             kalemler = [kalem.model_copy(update={"kalem_no": 1})]
             break
         kalemler.append(kalem)
+
+    # 3. adim: firma adını KALEMLERE göre üret -- sektör kelimesi fişle tutarlı olsun
+    # (ör. 'Taksi' yalnız faturada taksi kalemi varsa firma adına girer).
+    satici_adi = rastgele_firma_adi(is_kolu, firma_turu, kalemler)
 
     return Fatura(
         fatura_no=fatura_no,
