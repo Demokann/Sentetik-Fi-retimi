@@ -16,6 +16,8 @@ aciklama_claude.py
 aciklama_gemini.py
 gemma3_sonuclar.md
 qwen3:8_sonuclar.md
+simüle_edilmek_istenen.md
+deneme_20.md
 
 # data içindeki her şeyi ignore et
 data/*
