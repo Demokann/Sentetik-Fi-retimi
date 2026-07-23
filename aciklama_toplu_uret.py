@@ -171,13 +171,20 @@ def main():
                         if ihlaller:
                             genel_hala_ihlalli += 1
 
-            # Her dilim bitince diske yaz (crash-güvenli)
-            cikti_kaydet(cikti_yolu, cikti)
+                    # Her fatura bitince hemen diske yaz + yazdır -- burst
+                    # sonunu beklemeden anlık ilerleme görülsün ve kesintide
+                    # (Ctrl-C/çökme) o ana kadar üretilenler kaybolmasın.
+                    cikti_kaydet(cikti_yolu, cikti)
+                    ihlal_notu = f", kalan_ihlal={ihlaller}" if ihlaller else ""
+                    yakin_notu = ", yakin_kopya" if yakin else ""
+                    print(f"    [{genel_uretilen}] {fno} ({kategori}, deneme={deneme_sayisi}{ihlal_notu}{yakin_notu})")
+
             gecen = time.time() - dilim_basi
             print(f"    [dilim {dilim_no}/{len(dilimler)}] {len(dilim)} fatura işlendi ({gecen:.0f} sn), toplam üretilen: {genel_uretilen}")
 
-            # Son dilim değilse cooldown
-            if dilim_no < len(dilimler):
+            # Son dilim değilse cooldown (cooldown_min<=0 ise tamamen atlanır --
+            # pilot script'teki gibi model hiç indirilmeden sıcak kalmaya devam eder)
+            if dilim_no < len(dilimler) and args.cooldown_min > 0:
                 print(f"    [cooldown] model bellekten indiriliyor, {args.cooldown_min} dk mola...")
                 modeli_bellekten_indir(args.model, args.host)
                 time.sleep(args.cooldown_min * 60)
@@ -193,10 +200,10 @@ def main():
 
         print(f"=== {batch['dosya']} TAMAM ===\n")
 
-        # Batch'ler arası da cooldown (son işlenen batch değilse ve iş kaldıysa)
+        # Batch'ler arası da cooldown (son işlenen batch değilse, iş kaldıysa ve cooldown_min>0 ise)
         kalan_var = any(not b["tamam"] for b in durum["batchler"])
         sinir_var = args.max_batch and islenen_batch >= args.max_batch
-        if kalan_var and not sinir_var:
+        if kalan_var and not sinir_var and args.cooldown_min > 0:
             print(f"[cooldown] batch arası, model indiriliyor, {args.cooldown_min} dk mola...\n")
             modeli_bellekten_indir(args.model, args.host)
             time.sleep(args.cooldown_min * 60)
