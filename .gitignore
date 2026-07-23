@@ -5,31 +5,21 @@ __pycache__/
 
 .DS_Store
 deneme.py
-aciklamalar.md
-konsol2.5.txt
-konsol3.txt
-aciklamalar2.5.md
-aciklamalar3.md
-aciklamalar3.1.md
-konsol.txt
+
 aciklama_claude.py
 aciklama_gemini.py
-gemma3_sonuclar.md
-qwen3:8_sonuclar.md
+
 simüle_edilmek_istenen.md
-deneme_20.md
+
 CLAUDE.md
-faz1_sonu.md
-faz2_sonu.md
-faz3_sonu.md
-faz4_sonu.md
-faz5_sonu.md
-faz6_sonu.md
-ollama_sonuclar.md
+
 whaatif.py
 deneme_80.md
+#aciklama dosyalarını ignore et
+aciklama_mdler/*
 # data içindeki her şeyi ignore et
 data/*
+
 
 # belirli klasörleri dahil et
 !data/urun_verileri/
