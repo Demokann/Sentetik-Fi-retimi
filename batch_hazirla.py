@@ -11,7 +11,7 @@ türlerinin rastgele örneklemede ezilmesini önler. Eski aciklama_kategorisi
 bazlı orantılı seçim --secim-modu kategori ile hâlâ kullanılabilir.
 
 Kullanım:
-    python batch_hazirla.py --toplam 20000 --batch-size 1000 --tur-taban 400 --tur-tavan 600
+    python batch_hazirla.py --toplam 20000 --batch-size 1000 --tur-taban 300 --tur-tavan 600
 """
 
 import argparse
@@ -223,11 +223,52 @@ def _kategori_kotali_yeniden_ata(
     return yeni_kategoriler, override_sayisi
 
 
+def _konteyner_tavanlarini_hesapla(
+    tur_havuzlari: dict[str, list[str]],
+    tur_taban: int,
+    tur_tavan: int,
+    esik: float = 0.9,
+) -> dict[str, int]:
+    """
+    Bazı anomali türleri, başka bir (çok daha büyük) türün NEREDEYSE TAM ALT
+    KÜMESİDİR -- ör. genel_toplam/satir_toplami havuzlarının %100'ü aynı
+    zamanda footer_kismi'ye de sahip (injector yan etkisi: toplam/satır
+    tutarını bozmak doğal olarak footer tutarlılığını da bozuyor). Böyle bir
+    durumda "konteyner" türün (footer_kismi) tavanı normal (tur_tavan) kalırsa,
+    içindeki bağımlı türlerin taban hedeflerini AYNI ANDA karşılamak
+    matematiksel olarak imkânsız olur (ör. genel_toplam(300)+satir_toplami(300)
+    = 600, footer_kismi'nin tavanı da 600 ise footer'a kendi payına HİÇ yer
+    kalmaz, üstelik ikisi ayrı ayrı 300'e çıkmaya çalışırken birbirini bloklar).
+
+    Bu fonksiyon, hangi türün hangi türün konteyneri olduğunu (overlap oranı
+    >= esik) veriden OTOMATİK tespit eder ve konteyner türe, içerdiği her
+    bağımlı tür için tur_taban kadar EK bütçe tanır -- böylece konteyner hem
+    kendi normal payını (tur_tavan) korur hem de bağımlı türlerin tabanını
+    bloklamaz.
+    """
+    turler = list(tur_havuzlari.keys())
+    havuz_seti = {tur: set(fnolar) for tur, fnolar in tur_havuzlari.items()}
+    ekstra_butce: dict[str, int] = {tur: 0 for tur in turler}
+
+    for a in turler:
+        if not havuz_seti[a]:
+            continue
+        for b in turler:
+            if a == b or len(tur_havuzlari[b]) <= len(tur_havuzlari[a]):
+                continue
+            oran = len(havuz_seti[a] & havuz_seti[b]) / len(havuz_seti[a])
+            if oran >= esik:
+                # a, (daha büyük) b'nin neredeyse tam alt kümesi -- b konteyner
+                ekstra_butce[b] += tur_taban
+
+    return {tur: tur_tavan + ekstra_butce[tur] for tur in turler}
+
+
 def anomali_turu_kotali_sec(
     faturalar: list[dict],
     etiketler: list[dict],
     hedef_toplam: int = 20000,
-    tur_taban: int = 400,
+    tur_taban: int = 300,
     tur_tavan: int = 600,
     temiz_orani_min: float = 0.70,
     temiz_orani_max: float = 0.75,
@@ -290,6 +331,10 @@ def anomali_turu_kotali_sec(
     )
     tur_sirasi = bilinen_turler + yeni_turler
 
+    # Konteyner türlere (ör. footer_kismi, is_kolu_kategori_uyumsuzlugu) veriden
+    # otomatik tespitle ek tavan bütçesi tanı -- bkz. _konteyner_tavanlarini_hesapla.
+    tavan_efektif = _konteyner_tavanlarini_hesapla(tur_havuzlari, tur_taban, tur_tavan)
+
     # tur_sayaci: bir türden GERÇEKTE kaç fatura seçildiği (hangi türün
     # "sırasında" seçildiğine bakılmaksızın, union nedeniyle bir fatura başka
     # bir türün turunda seçilse bile bu türden sayılır). Tavan bunun üzerinden
@@ -300,20 +345,29 @@ def anomali_turu_kotali_sec(
     secilen_anomalili: set[str] = set()
 
     for tur in tur_sirasi:
-        ihtiyac = tur_tavan - tur_sayaci[tur]
+        ihtiyac = tavan_efektif[tur] - tur_sayaci[tur]
         if ihtiyac <= 0:
             continue
         adaylar = [fno for fno in tur_havuzlari[tur] if fno not in secilen_anomalili]
         sira = _cesitli_sira(adaylar, fatura_map, rnd)
+        # Münhasırlık önceliği: bu tur içindeki adaylar arasında, BAŞKA
+        # (tur_havuzlari'nda izlenen) türlere daha az sahip olanlar önce
+        # denenir -- böylece bir türü doldururken paylaşımlı/kıt bütçeli
+        # başka bir türün (ör. is_kolu_kategori_uyumsuzlugu) kotası gereksiz
+        # tüketilmez (bkz. limit_asimi örneği). sort() stabil olduğu için
+        # aynı münhasırlık skorundakiler arasında çeşitlilik sırası korunur.
+        sira.sort(key=lambda fno: sum(
+            1 for t2 in etiket_map[fno]["anomali_turleri"] if t2 != tur and t2 in tur_sayaci
+        ))
         alinan = 0
         for fno in sira:
             if alinan >= ihtiyac:
                 break
             turleri = etiket_map[fno]["anomali_turleri"]
-            # Bu faturayi almak, sahip olduğu BAŞKA bir türü tavanin üzerine
-            # taşıyorsa vazgeç -- kota her tür için bağımsız bir tavan, bir
-            # türü doldururken başkasını taşırmamalı.
-            if any(tur_sayaci[t2] >= tur_tavan for t2 in turleri if t2 != tur and t2 in tur_sayaci):
+            # Bu faturayi almak, sahip olduğu BAŞKA bir türü kendi (efektif)
+            # tavanının üzerine taşıyorsa vazgeç -- kota her tür için
+            # bağımsız bir tavan, bir türü doldururken başkasını taşırmamalı.
+            if any(tur_sayaci[t2] >= tavan_efektif[t2] for t2 in turleri if t2 != tur and t2 in tur_sayaci):
                 continue
             secilen_anomalili.add(fno)
             for t2 in turleri:
@@ -361,7 +415,8 @@ def anomali_turu_kotali_sec(
             "mevcut_havuzda": len(havuz),
             "secilen": secilen_bu_tur,
             "taban": tur_taban,
-            "tavan": tur_tavan,
+            "tavan": tavan_efektif[tur],
+            "konteyner": tavan_efektif[tur] > tur_tavan,
             "hedefin_altinda": yetersiz,
         }
 
@@ -394,9 +449,10 @@ def _kota_raporu_yazdir(rapor: dict) -> None:
     print("\n[+] Tür bazlı kota raporu:")
     for tur, bilgi in sorted(rapor["tur_bazli"].items(), key=lambda x: -x[1]["mevcut_havuzda"]):
         isaret = "  [HEDEF ALTINDA]" if bilgi["hedefin_altinda"] else ""
+        konteyner_etiketi = "  [KONTEYNER]" if bilgi["konteyner"] else ""
         print(
             f"      {tur:32s}: secilen={bilgi['secilen']:4d}  "
-            f"(havuz={bilgi['mevcut_havuzda']:5d}, taban={bilgi['taban']}, tavan={bilgi['tavan']}){isaret}"
+            f"(havuz={bilgi['mevcut_havuzda']:5d}, taban={bilgi['taban']}, tavan={bilgi['tavan']}){konteyner_etiketi}{isaret}"
         )
     if rapor["hedefin_altinda_kalan_turler"]:
         print(f"\n[!] Tabanin altinda kalan turler: {', '.join(rapor['hedefin_altinda_kalan_turler'])}")
@@ -439,7 +495,7 @@ def main():
              "kategori: eski aciklama_kategorisi bazli orantili secim",
     )
     parser.add_argument("--min-per-kategori", type=int, default=2500, help="[kategori modu] Nadir sınıflar için taban örnek sayısı")
-    parser.add_argument("--tur-taban", type=int, default=400, help="[kota modu] Anomali türü başına hedeflenen taban")
+    parser.add_argument("--tur-taban", type=int, default=300, help="[kota modu] Anomali türü başına hedeflenen taban")
     parser.add_argument("--tur-tavan", type=int, default=600, help="[kota modu] Anomali türü başına izin verilen tavan")
     parser.add_argument("--temiz-orani-min", type=float, default=0.70, help="[kota modu] Alt kümede hedeflenen minimum temiz oranı")
     parser.add_argument("--temiz-orani-max", type=float, default=0.75, help="[kota modu] Alt kümede hedeflenen maksimum temiz oranı")
