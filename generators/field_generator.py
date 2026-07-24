@@ -99,12 +99,18 @@ def temiz_urunleri_yukle(dosya_yolu: Path = TEMIZ_URUNLER_CSV) -> dict[HarcamaKa
             havuzlar.setdefault(kategori, []).append(_urun_kodu_temizle(baslik))
     return havuzlar
 
+# Firma adi belirli bir mutfagi isaret ettiginde SADECE o firmada gorunmesi
+# gereken menu bolumleri. Genel YEMEK_HIZMETI havuzuna ALINMAZLAR: boylece
+# notr adli bir restoran ("Mola Lokantasi") sushi/cig kofte satmaz.
+# Ters yon (burgercinin tavuk sis satmamasi) mutfak kisitiyla saglanir.
+DAR_MUTFAK_BOLUMLERI = {"cigkofte", "uzakdogu", "pastane_tatli", "balik", "pizza", "burger"}
+
+
 def yemek_urunleri_yukle(dosya_yolu: Path = YEMEK_URUNLERI_CSV) -> list[str]:
     """
     Restoran/yemek harcamasi icin hazirlanan temiz CSV'yi (kategori, urun_adi
-    sutunlari) okur. kategori sutunu (corbalar, ana_yemekler vb.) burada
-    ayrica kullanilmiyor -- tum satirlar zaten YEMEK_HIZMETI harcama
-    kategorisine ait, sadece urun_adi aciklama havuzuna alinir.
+    sutunlari) okur ve GENEL havuzu dondurur. DAR_MUTFAK_BOLUMLERI atlanir --
+    o urunler yalnizca adi eslesen firmada, mutfak kisiti uzerinden gorunur.
     Dosya yoksa bos liste doner, sabit havuz tek basina devrede kalir.
     """
     import csv as _csv
@@ -115,9 +121,26 @@ def yemek_urunleri_yukle(dosya_yolu: Path = YEMEK_URUNLERI_CSV) -> list[str]:
         reader = _csv.DictReader(f)
         for satir in reader:
             urun = (satir.get("urun_adi") or "").strip()
-            if urun:
+            bolum = (satir.get("kategori") or "").strip()
+            if urun and bolum not in DAR_MUTFAK_BOLUMLERI:
                 urunler.append(urun)
     return urunler
+
+
+def yemek_urunleri_bolumlu_yukle(dosya_yolu: Path = YEMEK_URUNLERI_CSV) -> dict[str, list[str]]:
+    """Ayni CSV'yi bolum -> [urun] olarak yukler (mutfak kisiti icin). Genel
+    havuzun aksine DAR bolumler de dahildir."""
+    import csv as _csv
+    if not dosya_yolu.exists():
+        return {}
+    bolumler: dict[str, list[str]] = {}
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        for satir in _csv.DictReader(f):
+            urun = (satir.get("urun_adi") or "").strip()
+            bolum = (satir.get("kategori") or "").strip()
+            if urun and bolum:
+                bolumler.setdefault(bolum, []).append(urun)
+    return bolumler
 
 def danismanlik_urunleri_yukle(dosya_yolu: Path = DANISMANLIK_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[tuple[str, str | None]]]:
     """Danışmanlık harcamaları için hazırlanan temiz CSV'yi okur (urun_adi, birim çiftleriyle)."""
@@ -637,6 +660,64 @@ def _ascii_kucuk(metin: str) -> str:
     return metin.translate(str.maketrans("ğüşıöç", "gusioc"))
 
 
+# --- Mutfak uyumu -----------------------------------------------------------
+# OSM'den gelen restoran adlarinin %44'u mutfak kelimesi tasiyor ("Tatlises Cig
+# Kofte", "Duru Balik"). Ad dikkate alinmadan kalem secilirse cigkoftecidan
+# sushi cikiyor; bu etiketleri bozmaz ama aciklama uretiminde ("X'ten aldik")
+# tutarsiz metin dogurur. Burada firma adindan mutfak tespit edilip kalem havuzu
+# ilgili menu bolumleriyle sinirlanir.
+#
+# NOT: Bu, emekliye ayrilan sektor-kelime / is_kolu-geri-okuma mekanizmasinin
+# geri donusu DEGILDIR. O, ADDAN is_kolu CIKARMAYA calisiyordu; bu ise zaten
+# bilinen is_kolu icinde yemek secimini daraltir.
+#
+# SIRA ONEMLI, ilk eslesen kazanir: "Tatlises Cig Kofte" hem "tatli" hem
+# "cig kofte" iceriyor -- cigkofte once geldigi icin dogru siniflanir.
+# Dar bolume ek olarak ilgili GENEL bolum de verilir: burgerci fast_food'daki
+# klasik burgerleri, pizzaci hamur_isleri'ndeki pizzalari da satabilsin.
+# Desenler DAR tutulur: "asya"/"deniz" gibi tek basina yaygin Turkce isimler
+# (Asya Kasap, Deniz Restaurant) yanlis pozitif uretip kasaba sushi yazdiriyordu.
+# Kural: kelime ancak mutfagi TEK BASINA belirtiyorsa desende yer alir.
+MUTFAK_KISITLARI: list[tuple[str, set[str]]] = [
+    (r"cig ?kofte",                        {"cigkofte", "icecekler"}),
+    (r"sushi|susi|wok|japon|ramen|noodle|teriyaki|uzak ?dogu|asya mutfa|cin mutfa|cin lokanta",
+                                           {"uzakdogu", "icecekler"}),
+    (r"pastane|tatlici|baklava|dondurma|waffle|kahve|coffee|cafe|kafe|patisserie",
+                                           {"pastane_tatli", "tatlilar", "icecekler"}),
+    (r"balik|deniz urunleri|deniz mahsul", {"balik", "ara_sicaklar_mezeler", "corbalar", "icecekler"}),
+    (r"pizza",                             {"pizza", "hamur_isleri", "icecekler", "ara_sicaklar_mezeler"}),
+    (r"burger",                            {"burger", "fast_food", "icecekler"}),
+]
+
+YEMEK_MENU_BOLUMLERI: dict[str, list[str]] = yemek_urunleri_bolumlu_yukle()
+
+
+def mutfak_anahtari(satici_unvan: str) -> str | None:
+    """Firma adinin isaret ettigi dar mutfagin KIMLIGI. Ayni anahtar = ayni menu
+    kisiti. Gruplama icin kullanilir (bkz. anomaly_injector.fatura_no_tekrari_uygula:
+    ayni fatura_no'yu paylasan cift ayni mutfaktan secilmeli, yoksa devralinan
+    unvan ile kalemler celisir). Eslesme yoksa None."""
+    ad = _ascii_kucuk(satici_unvan)
+    for desen, _ in MUTFAK_KISITLARI:
+        if re.search(desen, ad):
+            return desen
+    return None
+
+
+def mutfak_havuzu_sec(satici_unvan: str) -> list[str] | None:
+    """Firma adindan dar mutfak tespit eder ve o mutfaga uygun kalem havuzunu
+    dondurur. Eslesme yoksa None -> kisit uygulanmaz (genis mutfaklar: kebap,
+    doner, lokanta, ocakbasi, pide serbest kalir)."""
+    if not YEMEK_MENU_BOLUMLERI:
+        return None
+    anahtar = mutfak_anahtari(satici_unvan)
+    if anahtar is None:
+        return None
+    bolumler = next(b for d, b in MUTFAK_KISITLARI if d == anahtar)
+    havuz = [u for b in bolumler for u in YEMEK_MENU_BOLUMLERI.get(b, [])]
+    return havuz or None
+
+
 def _sektor_kelime_sec(is_kolu: IsKolu, kalemler=None) -> str:
     """İş koluna uygun sektör kelimesini, fişteki kalemlerle TUTARLI olacak şekilde
     seçer. Hizmete özel kelimeler (Taksi vb.) yalnız ilgili kalem varsa aday olur;
@@ -850,7 +931,10 @@ def rastgele_miktar(birim: str) -> float:
 def rastgele_kalem(
     kalem_no: int,
     izinli_kategoriler: list[HarcamaKategorisi],
-    kullanilan_aciklamalar: set[str],) -> FaturaKalemi:
+    kullanilan_aciklamalar: set[str],
+    yemek_havuzu: list[str] | None = None,) -> FaturaKalemi:
+    """`yemek_havuzu` verilirse YEMEK_HIZMETI kalemleri genel havuz yerine ondan
+    seçilir (firma adına göre mutfak kısıtı; bkz. mutfak_havuzu_sec)."""
     kategori = random.choice(izinli_kategoriler)
 
     # Büyük havuzlarda (CSV kaynaklı, binlerce eleman) tekrar filtresi hem
@@ -869,7 +953,10 @@ def rastgele_kalem(
         else:
             aciklama = random.choice(TEMEL_GIDA_MARKET_HAVUZU)
     else:
-        havuz = ACIKLAMA_HAVUZU[kategori]
+        if kategori == HarcamaKategorisi.YEMEK_HIZMETI and yemek_havuzu:
+            havuz = yemek_havuzu   # mutfak kısıtı: firma adına uygun bölümler
+        else:
+            havuz = ACIKLAMA_HAVUZU[kategori]
         if len(havuz) > BUYUK_HAVUZ_ESIGI:
             aciklama = random.choice(havuz)
         else:
@@ -979,6 +1066,11 @@ def rastgele_fatura() -> Fatura:
     satici_kimlik = firma["kimlik"]
     satici_adi = firma["unvan"]
 
+    # 2b. Mutfak kısıtı: firma adı dar bir mutfağı işaret ediyorsa (çiğköfteci,
+    # balıkçı, pizzacı...) yemek kalemleri o mutfağın menüsünden seçilir.
+    # Geniş mutfaklarda (kebap/lokanta/ocakbaşı) None döner, kısıt uygulanmaz.
+    yemek_havuzu = mutfak_havuzu_sec(satici_adi)
+
     fatura_tarihi = rastgele_tarih()
     fatura_no = rastgele_fatura_no(fatura_tarihi)
 
@@ -994,7 +1086,7 @@ def rastgele_fatura() -> Fatura:
     kullanilan_aciklamalar: set[str] = set()
     kalemler: list[FaturaKalemi] = []
     for i in range(kalem_sayisi):
-        kalem = rastgele_kalem(i + 1, izinli_kategoriler, kullanilan_aciklamalar)
+        kalem = rastgele_kalem(i + 1, izinli_kategoriler, kullanilan_aciklamalar, yemek_havuzu)
         if kalem.aciklama in TEKIL_ZORUNLU_ACIKLAMALAR:
             # Bu kalem seçildiği an, öncekiler dahil hepsini atip faturayi
             # TEK kalemli yapiyoruz (taksi/yakit fişi başka kalemle gelmez).

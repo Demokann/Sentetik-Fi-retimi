@@ -82,7 +82,16 @@ def benzersiz_isim(uretici, kullanilmis: set[str]) -> str | None:
     return None
 
 
-def registry_uret(hedef_per_iskolu: int) -> list[dict]:
+def registry_uret(taban_per_iskolu: int, osm_pay: float = 0.8) -> list[dict]:
+    """OSM adlarının TAMAMINI kullanır, üstüne sentetik + şahıs ekleyerek registry'yi
+    kurar. Bir iş kolunun nihai boyutu OSM adedinden TÜRETİLİR:
+
+        toplam = max(taban_per_iskolu, round(osm_adedi / osm_pay))
+
+    Yani OSM zengin bir iş kolunda (restoran 4000) hiçbir ad çöpe gitmez; toplam
+    büyür ve OSM payı ~%80'de kalır, kalan %20 sentetik kurumsal ad + şahıs olur.
+    OSM'si zayıf iş kollarında (lojistik 37) taban devreye girer ve dolgu artar.
+    """
     osm_adlari = osm_adlarini_yukle()
 
     kullanilmis_kimlik: set[str] = set()
@@ -92,18 +101,23 @@ def registry_uret(hedef_per_iskolu: int) -> list[dict]:
 
     for is_kolu in IsKolu:
         anahtar = is_kolu.value
-        sahis_sayisi = round(hedef_per_iskolu * SAHIS_ORANI)
-        tuzel_sayisi = hedef_per_iskolu - sahis_sayisi
 
-        # --- Tüzel kişi: önce OSM gerçek adları, sonra sentetik dolgu ---
         havuz = list(osm_adlari.get(anahtar, []))
         random.shuffle(havuz)
+
+        # Nihai boyut OSM adedinden türetilir; taban altına düşmez.
+        toplam = max(taban_per_iskolu, round(len(havuz) / osm_pay) if havuz else 0)
+        sahis_sayisi = round(toplam * SAHIS_ORANI)
+        tuzel_sayisi = toplam - sahis_sayisi
+        # OSM'nin tamamı kullanılır (tüzel kontenjanını aşmadığı sürece).
+        osm_hedef = min(len(havuz), tuzel_sayisi)
+
         osm_kullanildi = 0
         sentetik_kullanildi = 0
 
         for i in range(tuzel_sayisi):
             tur = random.choices(TUZEL_TURLER, weights=TUZEL_AGIRLIK, k=1)[0]
-            if osm_kullanildi < len(havuz):
+            if osm_kullanildi < osm_hedef:
                 ad = havuz[osm_kullanildi]
                 osm_kullanildi += 1
                 if ad in kullanilmis_ad:
@@ -149,8 +163,12 @@ def registry_uret(hedef_per_iskolu: int) -> list[dict]:
             })
             firma_id += 1
 
-        print(f"  {anahtar:<22} hedef={hedef_per_iskolu:<5} "
-              f"osm={osm_kullanildi:<5} sentetik={sentetik_kullanildi:<5} sahis={sahis_sayisi}")
+        yuzde = lambda n: 100 * n / toplam if toplam else 0
+        print(f"  {anahtar:<22} toplam={toplam:<5} "
+              f"osm={osm_kullanildi:<5}(%{yuzde(osm_kullanildi):.0f}) "
+              f"sentetik={sentetik_kullanildi:<5}(%{yuzde(sentetik_kullanildi):.0f}) "
+              f"sahis={sahis_sayisi:<4}(%{yuzde(sahis_sayisi):.0f})"
+              f"   [OSM havuzu {len(havuz)}, kullanilmayan {len(havuz) - osm_kullanildi}]")
 
     return kayitlar
 
@@ -167,15 +185,22 @@ def registry_yaz(kayitlar: list[dict]) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Firma registry üretici (tek kalıcı kaynak)")
-    parser.add_argument("--hedef-per-iskolu", type=int, default=1500,
-                        help="Her iş kolu için hedef firma sayısı (OSM + sentetik dolgu + şahıs)")
+    parser.add_argument("--hedef-per-iskolu", "--taban-per-iskolu", type=int, default=1500,
+                        dest="taban_per_iskolu",
+                        help="İş kolu başına TABAN firma sayısı. OSM'si bol iş kollarında "
+                             "nihai boyut OSM adedinden türetilir, taban yalnızca alt sınırdır.")
+    parser.add_argument("--osm-pay", type=float, default=0.8,
+                        help="OSM adlarının nihai registry'deki hedef payı (0.8 = %%80). "
+                             "OSM'nin TAMAMI kullanılır; bu oran üstüne ne kadar sentetik "
+                             "ekleneceğini belirler.")
     parser.add_argument("--seed", type=int, default=42,
                         help="Determinizm için seed — aynı seed = aynı registry (VKN'ler sabit)")
     args = parser.parse_args()
 
     random.seed(args.seed)
-    print(f"Registry üretiliyor (hedef/is_kolu={args.hedef_per_iskolu}, seed={args.seed})...")
-    kayitlar = registry_uret(args.hedef_per_iskolu)
+    print(f"Registry üretiliyor (taban/is_kolu={args.taban_per_iskolu}, "
+          f"osm-pay={args.osm_pay}, seed={args.seed})...")
+    kayitlar = registry_uret(args.taban_per_iskolu, args.osm_pay)
     registry_yaz(kayitlar)
 
     kaynak_sayim = Counter(k["kaynak"] for k in kayitlar)

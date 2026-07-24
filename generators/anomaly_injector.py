@@ -8,7 +8,8 @@ from schema import (
     POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI, paraya_yuvarla
 )
 from generators.field_generator import (
-    ACIKLAMA_HAVUZU, rastgele_birim, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura
+    ACIKLAMA_HAVUZU, rastgele_birim, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura,
+    mutfak_anahtari,
 )
 
 
@@ -407,11 +408,18 @@ def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> Non
     kullanilmis_indeksler: set[int] = set()
 
     for _ in range(tekrar_sayisi):
-        # Uygun indeksleri is_kolu'na göre grupla; çifti yalnız aynı is_kolu'ndan seç.
+        # Uygun indeksleri (is_kolu, mutfak) ikilisine göre grupla; çift yalnız aynı
+        # gruptan seçilir. Mutfak da anahtara dahil çünkü f2 f1'in UNVANINI devralıp
+        # kendi KALEMLERİNİ koruyor: pastane adı devralan bir faturada kebap kalemi
+        # kalırsa firma adı ile kalemler çelişir (mutfak kısıtının delindiği tek yol).
         gruplar: dict = {}
         for i in range(len(faturalar)):
             if i not in kullanilmis_indeksler:
-                gruplar.setdefault(faturalar[i].is_kolu, []).append(i)
+                f = faturalar[i]
+                mutfak = (mutfak_anahtari(f.satici_unvan)
+                          if HarcamaKategorisi.YEMEK_HIZMETI in IS_KOLU_KATEGORILERI[f.is_kolu]
+                          else None)
+                gruplar.setdefault((f.is_kolu, mutfak), []).append(i)
 
         uygun_gruplar = [idxler for idxler in gruplar.values() if len(idxler) >= 2]
         if not uygun_gruplar:

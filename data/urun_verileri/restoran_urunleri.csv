@@ -39,7 +39,6 @@ ana_yemekler_et,Kağıt Kebabı
 ana_yemekler_et,Çoban Kavurma
 ana_yemekler_et,Dana Biftek
 ana_yemekler_et,Etli Pilav
-
 ana_yemekler_tavuk,Tavuk Pirzola
 ana_yemekler_tavuk,Tavuk Kanat
 ana_yemekler_tavuk,Tavuk Bonfile Izgara
@@ -163,3 +162,98 @@ hizmet_ve_ekstralar,Ekstra Köfte
 hizmet_ve_ekstralar,Ekstra Patates
 hizmet_ve_ekstralar,Ekstra İçecek
 hizmet_ve_ekstralar,Masa Servisi
+cigkofte,Çiğ Köfte Porsiyon
+cigkofte,Çiğ Köfte Dürüm
+cigkofte,Sarma Çiğ Köfte
+cigkofte,Acılı Çiğ Köfte Porsiyon
+cigkofte,Domatesli Çiğ Köfte
+cigkofte,1 Kg Aile Boyu Çiğ Köfte
+cigkofte,500 gr Yarım Aile Boyu Çiğ Köfte
+cigkofte,250 gr Çiğ Köfte Paketi
+cigkofte,Çiğ Köfte Tabağı
+cigkofte,Mercimek Köftesi Porsiyon
+cigkofte,Ayran
+cigkofte,Büyük Boy Ayran
+cigkofte,Şalgam Suyu
+cigkofte,Acılı Şalgam Suyu
+cigkofte,Limonata
+cigkofte,Turşu Tabağı
+cigkofte,Marul Roka Tabağı
+cigkofte,Közlenmiş Biber Sos
+uzakdogu,California Roll
+uzakdogu,Somon Sushi
+uzakdogu,Maki Roll
+uzakdogu,Sashimi Tabağı
+uzakdogu,Karışık Sushi Tabağı
+uzakdogu,Ebi Tempura Roll
+uzakdogu,Miso Çorbası
+uzakdogu,Wonton Çorbası
+uzakdogu,Edamame
+uzakdogu,Spring Roll
+uzakdogu,Dim Sum Tabağı
+uzakdogu,Kung Pao Tavuk
+uzakdogu,Chow Mein Noodle
+uzakdogu,Pad Thai
+uzakdogu,Teriyaki Tavuk
+uzakdogu,Yakisoba
+uzakdogu,Karidesli Noodle
+pastane_tatli,Yaş Pasta Dilimi
+pastane_tatli,Poğaça
+pastane_tatli,Açma
+pastane_tatli,Su Böreği Porsiyon
+pastane_tatli,Kurabiye Kilo
+pastane_tatli,Ekler
+pastane_tatli,Profiterol
+pastane_tatli,Cheesecake Dilim
+pastane_tatli,Magnolia
+pastane_tatli,Kadayıf Porsiyon
+pastane_tatli,Milföy Tatlısı
+pastane_tatli,Doğum Günü Pastası
+balik,Levrek Izgara
+balik,Çupra Izgara
+balik,Somon Izgara
+balik,Palamut Izgara
+balik,Lüfer Izgara
+balik,Mezgit Tava
+balik,İstavrit Tava
+balik,Hamsi Tava
+balik,Barbunya Tava
+balik,Sardalya Izgara
+balik,Çipura Buğulama
+balik,Midye Dolma
+balik,Midye Tava
+balik,Ahtapot Salatası
+balik,Deniz Mahsulleri Tabağı
+balik,Balık Ekmek
+balik,Levrek Buğulama
+pizza,Margherita Pizza
+pizza,Karışık Pizza
+pizza,Pepperoni Pizza
+pizza,Sebzeli Pizza
+pizza,BBQ Tavuklu Pizza
+pizza,Bufalo Tavuklu Pizza
+pizza,Trüflü Mantarlı Pizza
+pizza,Sucuk Kaşarlı Pizza
+pizza,Akdeniz Pizza
+pizza,Lahmacun Pizza
+pizza,Kalzone
+pizza,Mini Pizza
+pizza,Pizza Ekmeği
+burger,Klasik Hamburger
+burger,Cheeseburger
+burger,Double Cheeseburger
+burger,Smash Burger 90 gr
+burger,Smash Burger 180 gr Çift Köfte
+burger,Smash Burger Cheddarlı
+burger,BBQ Chicken Burger
+burger,Atom Soslu Chicken Burger
+burger,Dynamite Soslu Chicken Burger
+burger,Crispy Chicken Burger
+burger,Tavuk Burger
+burger,Mantarlı Burger
+burger,Cheddar Burger
+burger,Barbekü Soslu Burger
+burger,Vejetaryen Burger
+burger,Patates Kızartması
+burger,Baharatlı Patates
+burger,Milkshake
