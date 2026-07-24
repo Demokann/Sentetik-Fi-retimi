@@ -919,7 +919,52 @@ def rastgele_fatura_no(fatura_tarihi: str) -> str:
 TEKIL_ZORUNLU_ACIKLAMALAR = {"Taksi Ücreti", "Yakit Gideri"}
 
 
+# --- Firma Registry (tek kalıcı firma-kimliği kaynağı) ---
+# Firma kişiliği artık FATURA bazlı DEĞİL, FIRMA bazlıdır: ad + kimlik no +
+# is_kolu + firma_türü tek bir registry'de (data/firma_registry.csv) DONAR ve
+# fatura üretimi bu registry'den bir firma SEÇER (icat etmez). Bu sayede aynı
+# ad→hep aynı VKN, aynı VKN→hep aynı ad (tutarsızlık yapısal olarak imkânsız).
+# Üretimi: firma_registry_olustur.py.
+FIRMA_REGISTRY_CSV = Path(__file__).parent.parent / "data" / "firma_registry.csv"
+
+# LAZY yükleme: import anında DEĞİL, ilk kullanımda bir kez okunur ve cache'lenir.
+# (firma_registry_olustur.py bu modülü import ettiği için, CSV henüz YOKken
+# import-anı yükleme tavuk-yumurta kilidine yol açardı.)
+_FIRMA_REGISTRY: dict[IsKolu, list[dict]] | None = None
+
+
+def firma_registry_yukle() -> dict[IsKolu, list[dict]]:
+    """CSV'yi is_kolu -> [{'unvan':..., 'kimlik':...}, ...] olarak yükler."""
+    import csv as _csv
+    if not FIRMA_REGISTRY_CSV.exists():
+        raise FileNotFoundError(
+            f"Firma registry bulunamadı: {FIRMA_REGISTRY_CSV}\n"
+            f"Önce registry'yi üret: python firma_registry_olustur.py"
+        )
+    gruplar: dict[IsKolu, list[dict]] = {}
+    with open(FIRMA_REGISTRY_CSV, encoding="utf-8") as f:
+        for satir in _csv.DictReader(f):
+            is_kolu = IsKolu(satir["is_kolu"])
+            gruplar.setdefault(is_kolu, []).append({
+                "unvan": satir["satici_unvan"],
+                "kimlik": satir["satici_kimlik"],
+            })
+    return gruplar
+
+
+def registry_firma_sec(is_kolu: IsKolu) -> dict:
+    """Verilen iş kolundaki registry firmalarından birini rastgele seçer."""
+    global _FIRMA_REGISTRY
+    if _FIRMA_REGISTRY is None:
+        _FIRMA_REGISTRY = firma_registry_yukle()
+    firmalar = _FIRMA_REGISTRY.get(is_kolu)
+    if not firmalar:
+        raise ValueError(f"Registry'de '{is_kolu.value}' iş kolu için firma yok.")
+    return random.choice(firmalar)
+
+
 def rastgele_fatura() -> Fatura:
+    # 1. adim: iş kolunu (fatura dağılımını) ağırlıklı seç -- mevcut dağılım korunur.
     is_kolu = random.choices(
         list(IS_KOLU_AGIRLIKLARI.keys()),
         weights=list(IS_KOLU_AGIRLIKLARI.values()),
@@ -927,8 +972,12 @@ def rastgele_fatura() -> Fatura:
     )[0]
     izinli_kategoriler = IS_KOLU_KATEGORILERI[is_kolu]
 
-    firma_turu = rastgele_firma_turu()             # 1. adim: tür seç (taksonomi)
-    satici_kimlik = rastgele_kimlik_no(firma_turu)         # 2. adim: kimlik no üret
+    # 2. adim: firma KİMLİĞİNİ registry'den SEÇ (ad + kimlik no sabit, fatura başına
+    # üretilmez). Sektör-kelime/geri-okuma mekanizması emekli oldu; is_kolu artık
+    # Fatura'da açıkça saklanıyor.
+    firma = registry_firma_sec(is_kolu)
+    satici_kimlik = firma["kimlik"]
+    satici_adi = firma["unvan"]
 
     fatura_tarihi = rastgele_tarih()
     fatura_no = rastgele_fatura_no(fatura_tarihi)
@@ -952,10 +1001,6 @@ def rastgele_fatura() -> Fatura:
             kalemler = [kalem.model_copy(update={"kalem_no": 1})]
             break
         kalemler.append(kalem)
-
-    # 3. adim: firma adını KALEMLERE göre üret -- sektör kelimesi fişle tutarlı olsun
-    # (ör. 'Taksi' yalnız faturada taksi kalemi varsa firma adına girer).
-    satici_adi = rastgele_firma_adi(is_kolu, firma_turu, kalemler)
 
     return Fatura(
         fatura_no=fatura_no,

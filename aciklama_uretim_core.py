@@ -244,7 +244,8 @@ MANIPULATIF_VURGU_IPUCLARI = [
     "Kesinlikle",
     "Yüzde yüz iş amaçlı",
     "Tamamen iş gereği",
-    "Hiç şüphesiz iş için",
+    "Hiç şüphesiz"
+    " iş için",
     "Yüzde yüz proje kapsamında",
     "Hiç kuşkusuz iş amaçlı",
     "Kesinlikle şirket gideri",
@@ -354,7 +355,8 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
     # bunu vermiyordu). Bizim kurallarımız (fişteki kalemler, rakam yok, pasif kalıp
     # yasağı) korunur. Kategoriye özel ayrıntı user prompt'taki 'Talimat'ta.
     system_prompt = (
-        "Sen bir yapay zeka DEĞİLSİN. Sen, ay sonu geldiği için masraf sistemine fiş giren "
+        # "Sen bir yapay zeka DEĞİLSİN. 
+        "Sen, ay sonu geldiği için masraf sistemine fiş giren "
         "gerçek bir şirket çalışanısın. Sana verilen KARAKTER tipine tam olarak bürüneceksin; "
         "bu dört karakter birbirinden kesinlikle farklı insanlar gibi konuşur:\n"
         "1) YETERLİ çalışan → işini düzgün yapan, ne için harcadığını rahatça söyleyen, kendinden emin biri.\n"
@@ -370,6 +372,8 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
         "- (AI_URETIMI hariç) edilgen/resmi kalıplar (edildi, edilmiştir, sağlanmıştır, karşılanmıştır) KULLANMA; "
         "birinci tekil şahıs, doğal ve konuşma diline yakın yaz.\n"
         "- İki karaktere birden benzeyen belirsiz cümle kurma; net bir karaktere gir.\n"
+        "- Firma/satıcı adını kaynak olarak kullan, doğru '-dan/-den/-tan/-ten' ekiyle: "
+        "'ABC Yazılım'dan lisans aldık', 'XYZ Market'ten malzeme aldım' gibi.\n"
     )
 
     if kategori == "yeterli":
@@ -649,6 +653,11 @@ DUZELTME_NOTLARI = {
         "Gerçek bir çalışan böyle yazmaz; SADELEŞTİR: ne olduğunu yaz (ör. 'el sabunu', "
         "'kupa seti', 'sabun'), '500Ml', '4'lü paket', renk/model gibi detayları ATLA."
     ),
+    "firma_icin_hatasi": (
+        "ÖNEMLİ DÜZELTME: Az önceki cevabında firma adının ardından '... için' geldi, bu satın "
+        "alınan yeri değil amacı gösterir. Firmayı kaynak olarak yaz: 'ABC Yazılım'dan lisans aldık', "
+        "'XYZ Market'ten malzeme aldım' gibi doğru '-dan/-den/-tan/-ten' ekiyle."
+    ),
 }
 
 
@@ -848,6 +857,20 @@ def _urun_detay_kopya_mi(metin: str) -> bool:
     return bool(_URUN_DETAY_GURULTU.search(metin))
 
 
+def _firma_icin_hatasi_mi(metin: str, fatura: dict) -> bool:
+    """Firma adının hemen ardından 'için' gelmesi ('ABC için X aldık' gibi),
+    doğru kaynak ekinin (-dan/-den/-tan/-ten) yerine yanlışlıkla amaç eki
+    kullanıldığını gösterir (bkz. sistem prompt kuralı). Firma adı kısaltılmış
+    hâliyle (firma_adi_kisalt) aranır, Türkçe-dayanıklı normalize ile (_tr_normalize)."""
+    firma_kisa = firma_adi_kisalt(fatura["satici_unvan"])
+    if not firma_kisa:
+        return False
+    metin_norm = _tr_normalize(metin)
+    firma_norm = _tr_normalize(firma_kisa)
+    desen = re.escape(firma_norm) + r"\W{0,3}icin\b"
+    return re.search(desen, metin_norm) is not None
+
+
 def _verbatim_kopya_mi(metin: str, kategori: str) -> bool:
     """Üretilen metin, prompt'ta gösterilen FEW-SHOT örneklerinden birine neredeyse
     birebir mi? Stil demirleme yerine kopya -> çeşitlilik ölür. yetersiz'e UYGULANMAZ:
@@ -911,6 +934,8 @@ def ihlalleri_bul(metin: str, kategori: str, fatura: dict, meta: dict | None = N
         ihlaller.append("meta_sizinti")
     if _verbatim_kopya_mi(metin, kategori):
         ihlaller.append("verbatim_kopya")
+    if _firma_icin_hatasi_mi(metin, fatura):
+        ihlaller.append("firma_icin_hatasi")
 
     # Uzunluk: kategoriye özel SABİT sınır yerine, prompt_olustur'un bu faturaya
     # atadığı kategoriden-bağımsız uzunluk hedefine göre denetle (kategori-uzunluk

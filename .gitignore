@@ -8,9 +8,10 @@ deneme.py
 
 aciklama_claude.py
 aciklama_gemini.py
-
+firma_adlari_cikar.py
+firma_adlari_osm_cek.py
 simüle_edilmek_istenen.md
-
+.claude/*
 CLAUDE.md
 
 whaatif.py

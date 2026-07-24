@@ -394,6 +394,12 @@ def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> Non
     ait olduğu icin unvan da eşitlenerek ilişki gerçekçi kaliyor.
     Ayrica ayni faturanin birden fazla çiftte kullanilmasini önlemek icin
     kullanilmiş indeksler takip edilir.
+
+    ÇİFT AYNI is_kolu'ndan seçilir: aynı VKN = aynı satıcı = aynı sektör olduğu
+    için (registry mimarisiyle is_kolu artık export edilen bir firma özniteliği),
+    f2 f1'in VKN+unvan+is_kolu'sunu TUTARLI biçimde devralir. Kalemler de aynı
+    is_kolu'ndan olduğundan istenmeyen bir is_kolu_kategori_uyumsuzlugu yan etiketi
+    ÜREMEZ; değişmez korunur (bir VKN -> tek is_kolu).
     """
     if len(faturalar) < 2:
         return
@@ -401,15 +407,22 @@ def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> Non
     kullanilmis_indeksler: set[int] = set()
 
     for _ in range(tekrar_sayisi):
-        musait_indeksler = [i for i in range(len(faturalar)) if i not in kullanilmis_indeksler]
-        if len(musait_indeksler) < 2:
-            break   # havuz tükendi, daha fazla çift üretilemez
+        # Uygun indeksleri is_kolu'na göre grupla; çifti yalnız aynı is_kolu'ndan seç.
+        gruplar: dict = {}
+        for i in range(len(faturalar)):
+            if i not in kullanilmis_indeksler:
+                gruplar.setdefault(faturalar[i].is_kolu, []).append(i)
 
-        idx1, idx2 = random.sample(musait_indeksler, 2)
+        uygun_gruplar = [idxler for idxler in gruplar.values() if len(idxler) >= 2]
+        if not uygun_gruplar:
+            break   # aynı is_kolu'ndan çift kalmadı, daha fazla üretilemez
+
+        idx1, idx2 = random.sample(random.choice(uygun_gruplar), 2)
         f1, f2 = faturalar[idx1], faturalar[idx2]
 
         f2.satici_vkn = f1.satici_vkn      # anomalinin gerçek sayilmasi için şart
         f2.satici_unvan = f1.satici_unvan  # ayni VKN = ayni firma tutarliliğini korumak için şart
+        f2.is_kolu = f1.is_kolu            # aynı is_kolu (zaten eşit) -- değişmezi açıkça garanti et
         faturalar[idx2] = fatura_no_tekrari_anomali_uret(f2, f1.fatura_no)
         faturalar[idx2].is_anomali = True
         faturalar[idx2].anomali_turleri = faturalar[idx2].anomali_turleri + ["fatura_no_tekrari"]

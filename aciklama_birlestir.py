@@ -64,7 +64,9 @@ def main():
             sonuc.append(fatura)
 
     with open(args.output_json, "w", encoding="utf-8") as f:
-        json.dump(sonuc, f, ensure_ascii=False)
+        # indent=2: faturalar.json ile aynı biçim (main.py) -- nihai çıktı elle
+        # incelenen dosya, tek satır olunca editörde açmak zorlaşıyor.
+        json.dump(sonuc, f, ensure_ascii=False, indent=2)
 
     print(f"[+] {eslesen} faturaya aciklama_metni eklendi.")
     print(f"[+] Toplam {len(sonuc)} fatura yazıldı -> {args.output_json}")

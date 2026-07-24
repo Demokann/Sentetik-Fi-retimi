@@ -18,6 +18,9 @@ def fatura_to_dict(fatura) -> dict:
         "fatura_tarihi": fatura.fatura_tarihi,
         "satici_vkn": fatura.satici_vkn,
         "satici_unvan": fatura.satici_unvan,
+        "is_kolu": fatura.is_kolu.value,   # model girdisi -- leakage DEĞİL (gerçek
+        # masraf sisteminde satıcının sektörü zaten bilinir). Registry mimarisiyle
+        # is_kolu artık kimlikten geri-okunmaz, doğrudan taşınır.
         "alici_vkn": fatura.alici_vkn,
         "alici_unvan": fatura.alici_unvan,
         "toplam_vergisiz_tutar": float(fatura.toplam_vergisiz_tutar),   # yeni
@@ -139,35 +142,32 @@ def main():
     # ONCELIK_SIRASI eksik bilgiyle çalışır.
     veri_setine_aciklama_kategorisi_ata(fatura_nesneleri)
 
-    # VKN-firma tutarsizliklari (ayni ad farkli VKN VEYA ayni VKN farkli ad)
-    # JSON/CSV export'a hiç dahil edilmesin -- sadece raporda görünmesi
-    # yetmiyor, veri setine kirli örnek olarak sizmasin istiyoruz.
-    # fatura_no_tekrari anomalisi KASITLI olarak ayni VKN'ye farkli unvan
-    # bindiriyor (validators.py'nin bunu gerçek anomali sayabilmesi için
-    # VKN'lerin eşleşmesi şart, bkz. anomaly_injector.py). Bu VKN'ler
-    # genel tutarlilik filtresinden MUAF tutulmali, yoksa kasitli anomali
-    # yanlislikla silinir.
+    # VKN-firma tutarlilik GÜVENLİK KONTROLÜ (artık veri SİLMEZ).
+    # Firma registry mimarisiyle (firma_registry_olustur.py) her ad→sabit VKN ve
+    # her VKN→sabit ad garantisi İNŞA gereği sağlanır; dolayısıyla bu kontrol
+    # normalde SIFIR çelişki bulmalı. Eskiden burada çelişkili faturalar SİLİNİYORDU
+    # (100k üretimde ~25k fatura eleniyordu, fatura_no seti nondeterministik oluyordu);
+    # registry bu sorunu ortadan kaldırdığı için artık silmiyoruz -- sadece beklenmedik
+    # bir çelişki çıkarsa (registry bütünlüğü bozulmuşsa) GÜRÜLTÜLÜ uyarı veriyoruz.
+    # fatura_no_tekrari anomalisi VKN+unvan'ı BİRLİKTE eşitlediği için çelişki üretmez;
+    # yine de muafiyeti koruyoruz (ör. gecersiz_kimlik_no rastgele VKN çakışması).
     korunan_vknler = {
         f.satici_vkn for f in fatura_nesneleri
-        if "fatura_no_tekrari" in f.anomali_turleri
+        if "fatura_no_tekrari" in f.anomali_turleri or "gecersiz_kimlik_no" in f.anomali_turleri
     }
     korunan_adlar = {
         f.satici_unvan for f in fatura_nesneleri
         if "fatura_no_tekrari" in f.anomali_turleri
     }
-    
+
     vkn_firma_hatalari = vkn_firma_tutarlilik_hatalarini_bul(fatura_nesneleri)
     celiskili_adlar = set(vkn_firma_hatalari["ayni_ad_farkli_vkn"].keys()) - korunan_adlar
     celiskili_vknler = set(vkn_firma_hatalari["ayni_vkn_farkli_ad"].keys()) - korunan_vknler
-    elenen_fatura_sayisi = 0
+    elenen_fatura_sayisi = 0   # registry mimarisi: fatura ELENMİYOR (deterministik fatura_no seti)
     if celiskili_adlar or celiskili_vknler:
-        once_sayisi = len(fatura_nesneleri)
-        fatura_nesneleri = [
-            f for f in fatura_nesneleri
-            if f.satici_unvan not in celiskili_adlar and f.satici_vkn not in celiskili_vknler
-        ]
-        elenen_fatura_sayisi = once_sayisi - len(fatura_nesneleri)
-        print(f"VKN-firma tutarsizligi nedeniyle elenen fatura sayisi: {elenen_fatura_sayisi}")
+        print(f"[!] UYARI: registry mimarisiyle beklenmeyen VKN-firma çelişkisi bulundu "
+              f"(ayni_ad_farkli_vkn={len(celiskili_adlar)}, ayni_vkn_farkli_ad={len(celiskili_vknler)}). "
+              f"Fatura SİLİNMEDİ; registry bütünlüğünü kontrol et (firma_registry.csv).")
     rapor = dogrulama_raporu_olustur(fatura_nesneleri)
     rapor["hedef_anomali_orani"] = args.anomali_orani
     rapor["talep_edilen_fatura_adedi"] = args.count

@@ -575,7 +575,10 @@ def main():
         batch_dosya = f"batch_{batch_no:04d}.json"
         cikti_dosya = f"batch_{batch_no:04d}_ciktilar.json"
         with open(cikti_dizini / batch_dosya, "w", encoding="utf-8") as f:
-            json.dump(dilim, f, ensure_ascii=False)
+            # indent=2: faturalar.json ile aynı biçim (main.py). Tek satırlık JSON
+            # editörde inceleme sırasında donduruyordu -- açıklama üretimini teşhis
+            # ederken aynı faturaya bakmak yaygın bir iş, okunabilirlik önemli.
+            json.dump(dilim, f, ensure_ascii=False, indent=2)
         batch_manifest.append({
             "dosya": batch_dosya,
             "cikti_dosyasi": cikti_dosya,
