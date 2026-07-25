@@ -319,46 +319,54 @@ def kdv_tutari_anomali_uret(fatura: Fatura) -> Fatura:
 #Sistematik yuvarlama anomalisi kaldırıldı. Gerçek fişlerde kuruş bazlı yuvarlama zaten olabiliyor. False-positive riski.
 
 
-# def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:  #Tespiti ile ilgili validator.py'de ayrıca bir iş kuralı yazılmalı
-#     """
-#     Veri girişi hatasi (fat-finger) simülasyonu: rastgele bir kalemin
-#     birim_fiyat'ini GERÇEKTEN 10x ya da 100x kaydirir. Bu, sahte_* alanlari
-#     kullanan diğer anomalilerden farkli — burada 'gerçek' birim_fiyat
-#     değişiyor, dolayisiyla ara_toplam/kdv_tutari/satir_toplam hep kendi
-#     içinde matematiksel olarak TUTARLI kalir (validators.py'deki hesap
-#     kontrollerinin hiçbirini tetiklemez). Yakalanmasi gereken yer, işin
-#     doğasi gereği fahiş/anormal birim fiyat tespiti (ayri bir iş kurali/
-#     istatistiksel anomali tespiti gerektirir, matematiksel doğrulama değil).
-#     Güncelleme: fahis fiyat validasyonları enflasyon ve piyasa fiyat değişkenliği nedeniyle kaldırıldı.
-#     fakat bu anomalinin fat finger senaryosu olması durumu değiştirebilir. Şimdilik dursun fakat yorum satırı olarak
-#     """
-#     hedef_index = random.randrange(len(fatura.kalemler))
-#     kalem = fatura.kalemler[hedef_index]
+# 8. Ondalık (Decimal-Point) Kayması — Fat-Finger Veri Girişi Hatası
+#
+# Bu iki anomali diğer matematiksel anomalilerden FARKLIDIR: sahte_* alanları
+# KULLANMAZ, GERÇEK birim_fiyat'ı değiştirir. Dolayısıyla ara_toplam/kdv_tutari/
+# satir_toplam kalemin kendi içinde matematiksel olarak TUTARLI kalır -->
+# validators.py'deki hesap kontrollerinin hiçbirini tetiklemezler. Tespitleri
+# matematiksel değil, FİYAT-MAKULLÜĞÜ (plausibility) temellidir: bir kalem,
+# kategorisinin makul fiyat bandını cömert bir katsayı kadar aşarsa/altında
+# kalırsa ondalık kayması şüphesi doğar (bkz. validators.kalem_ondalik_kaymasi_yukari_mi
+# / kalem_ondalik_kaymasi_asagi_mi).
+#
+# ADLANDIRMA NOTU: eskiden bu anomali "fahis_fiyat/dusuk_fiyat" adıyla tespit
+# edilirdi; o ad ENFLASYONA bağlı fiyat artışı çağrışımı yapıyordu. Oysa bu bir
+# VERİ GİRİŞ HATASIdır (ondalık noktasının 10x/100x yanlış yazılması), enflasyon
+# değil. Bu yüzden hem enjeksiyon hem tespit artık "ondalik_kaymasi" (yukarı) ve
+# "dusuk_ondalik_kaymasi" (aşağı) adlarını kullanır.
 
-#     kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
-#     kalem.birim_fiyat = kalem.birim_fiyat * kayma_carpani
+def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
+    """
+    Fat-finger simülasyonu: rastgele bir kalemin birim_fiyat'ını 10x ya da 100x
+    YUKARI kaydırır (ondalık noktası sağa kaymış / lira-kuruş karışıklığı gibi).
+    GERÇEK birim_fiyat değiştiği için kalem içi hesaplar (ara_toplam/kdv_tutari/
+    satir_toplam) tutarlı kalır; tespit matematiksel doğrulamayla değil,
+    fiyat-makullüğü kontrolüyle yapılır (validators.kalem_ondalik_kaymasi_yukari_mi).
+    """
+    hedef_index = random.randrange(len(fatura.kalemler))
+    kalem = fatura.kalemler[hedef_index]
 
-#     return fatura
+    kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
+    kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat * kayma_carpani)
 
-# 8. Ters Yönlü Ondalık Kaymasi (Fiyat Çok Düşük)
+    return fatura
 
-# def dusuk_ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
-#     """
-#     ondalik_kaymasi_anomali_uret'in ters yönü: veri girişi hatasi simülasyonu,
-#     ama bu kez fiyat kasitli olarak 10x ya da 100x KÜÇÜLTÜLÜYOR (ör. kuruş/lira
-#     karişikliği, ya da ondalik noktasinin yanliş yazilmasi). Diğer matematiksel
-#     anomalilerden farkli - gerçek birim_fiyat değişiyor, dolayisiyla kalemin
-#     kendi içindeki hesaplar (ara_toplam/kdv_tutari/satir_toplam) tutarli kalir.
-#     Tespiti matematiksel doğrulamayla değil, fahiş/anormal düşük fiyat
-#     tespitiyle (istatistiksel/iş kurali) yapilmali.
-#     """
-#     hedef_index = random.randrange(len(fatura.kalemler))
-#     kalem = fatura.kalemler[hedef_index]
 
-#     kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
-#     kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat / kayma_carpani)
+def dusuk_ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
+    """
+    ondalik_kaymasi_anomali_uret'in ters yönü: rastgele bir kalemin birim_fiyat'ı
+    10x ya da 100x AŞAĞI kaydırılır (ör. ondalık noktasının sola yazılması,
+    kuruş/lira karışıklığı). Yine GERÇEK birim_fiyat değişir, kalemin kendi içi
+    hesapları tutarlı kalır; tespit fiyat-makullüğü kontrolüyle yapılır.
+    """
+    hedef_index = random.randrange(len(fatura.kalemler))
+    kalem = fatura.kalemler[hedef_index]
 
-#     return fatura
+    kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
+    kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat / kayma_carpani)
+
+    return fatura
 
 
 # 9. Basamak/Rakam Karişikliği (Transposition Hatasi) kaldırıldı. OCR bu hatanın ayrımını yapamayabilir güven oranı düşük bir anomali olduğundan kaldırıldı.
@@ -376,8 +384,10 @@ ANOMALI_FONKSIYONLARI = {
     "kdv_tutari": kdv_tutari_anomali_uret,
     "satir_toplami": satir_toplami_anomali_uret,
 
-    # "ondalik_kaymasi": ondalik_kaymasi_anomali_uret,
-    # "dusuk_ondalik_kaymasi": dusuk_ondalik_kaymasi_anomali_uret,   # yeni
+    # Fat-finger ondalık kayması (gerçek birim_fiyat 10x/100x kayar; kalem içi
+    # hesap tutarlı kalır, tespit fiyat-makullüğü bandıyla -- bkz. validators).
+    "ondalik_kaymasi": ondalik_kaymasi_anomali_uret,
+    "dusuk_ondalik_kaymasi": dusuk_ondalik_kaymasi_anomali_uret,
 
     "genel_toplam": genel_toplam_anomali_uret,
     "footer_kismi": footer_kismi_anomali_uret,
@@ -482,13 +492,24 @@ if __name__ == "__main__":
     from validators import (
         kalem_ara_toplam_dogrula, kalem_kdv_tutari_dogrula,
         kalem_satir_toplam_dogrula, fatura_footer_tutarlilik_dogrula,
+        kalem_ondalik_kaymasi_yukari_mi, kalem_ondalik_kaymasi_asagi_mi,
     )
+
+    def _ondalik_etiket(k):
+        if kalem_ondalik_kaymasi_yukari_mi(k):
+            return "ondalik_kaymasi"
+        if kalem_ondalik_kaymasi_asagi_mi(k):
+            return "dusuk_ondalik_kaymasi"
+        return "-"
 
     testler = [
         ("ara_toplam", ara_toplam_anomali_uret),
         ("kdv_tutari", kdv_tutari_anomali_uret),
         ("satir_toplami", satir_toplami_anomali_uret),
-        # ("ondalik_kaymasi", ondalik_kaymasi_anomali_uret),
+        # Ondalık kaymaları matematiği BOZMAZ (tüm hesap ✓ kalır); tespitleri
+        # fiyat-makullüğü sütununda görünür (ondalik: dolu, diğerlerinde None).
+        ("ondalik_kaymasi", ondalik_kaymasi_anomali_uret),
+        ("dusuk_ondalik_kaymasi", dusuk_ondalik_kaymasi_anomali_uret),
         ("genel_toplam", genel_toplam_anomali_uret),
         ("footer_kismi", footer_kismi_anomali_uret),
     ]
@@ -501,5 +522,6 @@ if __name__ == "__main__":
         for k in fatura.kalemler:
             print(f"  ara_toplam:{'✓' if kalem_ara_toplam_dogrula(k) else '✗'} "
                   f"kdv_tutari:{'✓' if kalem_kdv_tutari_dogrula(k) else '✗'} "
-                  f"satir_toplam:{'✓' if kalem_satir_toplam_dogrula(k) else '✗'}")
+                  f"satir_toplam:{'✓' if kalem_satir_toplam_dogrula(k) else '✗'} "
+                  f"ondalik:{_ondalik_etiket(k)}")
         print(f"  footer:{'✓' if fatura_footer_tutarlilik_dogrula(fatura) else '✗'}")

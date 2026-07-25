@@ -32,11 +32,20 @@ ACIKLAMA_KATEGORI_ORANLARI: dict[str, list[float]] = {
     "satir_toplami":                   [50, 28, 12, 10],
 }
 
-# Tabloda karşılığı olmayan türler (ör. pasif/kaldırılmış ya da salt
-# validator-kaynaklı sinsi matematiksel türler: basamak_karisikligi,
-# ondalik_kaymasi, dusuk_ondalik_kaymasi, sistematik_yuvarlama, fahis_fiyat,
-# dusuk_fiyat) için varsayılan "teknik/yapısal" dağılım -- footer_kismi/
-# kdv_tutari ile ayni mantık: çalışanın fark edemeyeceği, metinle bağı zayıf.
+# Fat-finger ondalık kaymaları (ondalik_kaymasi / dusuk_ondalik_kaymasi) açıklama
+# metninden BAĞIMSIZDIR: hata, çalışan fotoğrafı yükleyip açıklamayı yazdıktan
+# SONRA fiyat alanına girer (OCR yanlış okuması ya da muhasebecinin/çalışanın elle
+# düzeltmesi). Bu yüzden açıklama, TEMİZ bir fişinki gibi yazılmıştır -> footer/kdv
+# gibi "teknik" dağılıma değil, doğrudan "temiz" dağılımına eşlenirler (manipülasyona
+# KAYMAZLAR). Ek fayda: sırf-sayısal bu anomalinin metin kanalına sızmasını önler
+# (model onu açıklamadan değil, RAKAMDAN öğrenmek zorunda kalır -- leakage önleme).
+ACIKLAMA_KATEGORI_ORANLARI["ondalik_kaymasi"] = list(ACIKLAMA_KATEGORI_ORANLARI["temiz"])
+ACIKLAMA_KATEGORI_ORANLARI["dusuk_ondalik_kaymasi"] = list(ACIKLAMA_KATEGORI_ORANLARI["temiz"])
+
+# Tabloda karşılığı olmayan türler (salt validator-kaynaklı sinsi matematiksel
+# türler: basamak_karisikligi, sistematik_yuvarlama) için varsayılan "teknik/
+# yapısal" dağılım -- footer_kismi/kdv_tutari ile ayni mantık: çalışanın fark
+# edemeyeceği, metinle bağı zayıf.
 VARSAYILAN_TEKNIK_ORAN = [55, 30, 5, 10]
 
 # Çoklu-etiketli faturalarda (union etiketleme nedeniyle birden fazla tür

@@ -5,6 +5,7 @@ from schema import (
     IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
 )
 from generators.anomaly_injector import ANOMALI_FONKSIYONLARI
+from generators.field_generator import FIYAT_ARALIGI_GENEL
 
 
 
@@ -124,9 +125,59 @@ def kalem_limit_asimi_mi(kalem: FaturaKalemi) -> bool:
     limit = POLICY_TUTAR_LIMITLERI.get(kalem.harcama_kategorisi)
     return limit is not None and kalem.birim_fiyat > Decimal(str(limit))
 
-#5e. Fahiş Fiyat Kontrolü kaldırıldı. Fiyat aralılkarı enflasyona göre eskiyebilir.
+#5e/5f. Ondalık (Decimal-Point) Kayması Tespiti — Fat-Finger Fiyat Hatası
+#
+# Eski "fahiş fiyat / düşük fiyat" kontrolü statik ve DAR bir fiyat bandı
+# kullandığı için enflasyonla eskiyip false-positive üretiyordu ve kaldırılmıştı.
+# Burada geri getirilen kontrol farklıdır: amacı enflasyona bağlı DRIFT'i değil,
+# ondalık noktasının 10x/100x yanlış yazılmasından (fat-finger) doğan KABA
+# kaymayı yakalamaktır (bkz. anomaly_injector.ondalik_kaymasi_anomali_uret /
+# dusuk_ondalik_kaymasi_anomali_uret). Bu yüzden band CÖMERT tutulur: normal
+# üretimdeki ±%30 aralık-dışı gürültüyü de, limit_asimi'nin ürettiği yüksek ama
+# meşru fiyatları da YAKALAMAZ; yalnızca büyüklük sırası (order-of-magnitude)
+# sapmalarını ayıklar. Cömert band enflasyona da dayanıklıdır (dar statik bandın
+# aksine).
+ONDALIK_KAYMASI_BANT_CARPANI = Decimal("5")
 
-#5f. Düşük Fiyat Kontrolü kaldırıldı. Fiyat aralıkları enflasyona göre eskiyebilir. Türkiye koşullarında 6 ayda ciddi sapma olabilir. Periyodik güncelleme şart.
+
+def kalem_ondalik_kaymasi_yukari_mi(kalem: FaturaKalemi) -> bool:
+    """
+    Kalemin birim fiyatı, kategorisinin makul bandının (FIYAT_ARALIGI_GENEL üst
+    sınırı) ONDALIK_KAYMASI_BANT_CARPANI katını aşıyor mu? Aşıyorsa YUKARI yönlü
+    fat-finger ondalık kayması (10x/100x) şüphesi -> 'ondalik_kaymasi' etiketi.
+
+    NOT (bilinçli taviz): dar bantlı kategorilerde küçük tutarlı bir kalemin 10x
+    kayması bandı aşmayabilir; o kayma bu kontrolle yakalanamaz. Ground truth
+    zaten enjektör tarafında TAM etiketlenir (fatura_no üzerinden), bu kontrol
+    union tarafında yalnızca KABA kaymaları geri kazanır.
+
+    Band olağan ±%30 fiyat varyansını elemeyecek kadar cömerttir; yalnızca
+    büyüklük-sırası (order-of-magnitude) aykırılıkları tetikler. Nadiren TEMİZ bir
+    fatura da tetikleyebilir (geniş bantlı kategorilerde doğal gürültünün uç
+    kuyruğu gerçekten aşırı bir fiyat ürettiğinde) -- bu bir yanlış-pozitif DEĞİL,
+    union etiketlemenin amacıdır: doğal varyansın ürettiği gerçek büyüklük-sırası
+    aykırılığı da etiketlenmelidir (bkz. kural_ihlali_turlerini_tespit_et notu).
+    """
+    aralik = FIYAT_ARALIGI_GENEL.get(kalem.harcama_kategorisi)
+    if aralik is None:
+        return False
+    high = Decimal(str(aralik[1]))
+    return kalem.birim_fiyat > high * ONDALIK_KAYMASI_BANT_CARPANI
+
+
+def kalem_ondalik_kaymasi_asagi_mi(kalem: FaturaKalemi) -> bool:
+    """
+    Kalemin birim fiyatı, kategorisinin makul bandının (FIYAT_ARALIGI_GENEL alt
+    sınırı) ONDALIK_KAYMASI_BANT_CARPANI katı ALTINDA mı? Altındaysa AŞAĞI yönlü
+    fat-finger ondalık kayması (÷10/÷100) şüphesi -> 'dusuk_ondalik_kaymasi'
+    etiketi. Yukarı yöndeki eşdeğerinin (kalem_ondalik_kaymasi_yukari_mi) aynı
+    bilinçli tavizi geçerlidir.
+    """
+    aralik = FIYAT_ARALIGI_GENEL.get(kalem.harcama_kategorisi)
+    if aralik is None:
+        return False
+    low = Decimal(str(aralik[0]))
+    return kalem.birim_fiyat < low / ONDALIK_KAYMASI_BANT_CARPANI
 
 
 #6. VKN-Firma Tutarlilik Kontrolü (Ayni VKN farkli unvan, ya da ayni unvan farkli VKN)
@@ -212,6 +263,18 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
                 f"LIMIT_ASIMI: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
                 f"birim fiyati limiti aşiyor: {kalem.birim_fiyat} > {limit}"
             )
+        if kalem_ondalik_kaymasi_yukari_mi(kalem):
+            hatalar.append(
+                f"ONDALIK_KAYMASI: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
+                f"birim fiyati kategori bandini aşiri aşiyor (fat-finger şüphesi): "
+                f"{kalem.birim_fiyat}"
+            )
+        elif kalem_ondalik_kaymasi_asagi_mi(kalem):
+            hatalar.append(
+                f"DUSUK_ONDALIK_KAYMASI: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
+                f"birim fiyati kategori bandinin aşiri altinda (fat-finger şüphesi): "
+                f"{kalem.birim_fiyat}"
+            )
 
     return hatalar
 
@@ -229,12 +292,19 @@ def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
     tetiklenen ihlalleri, ayrı manuel yama gerektirmeden otomatik
     yakalamaktir.
 
-    KASITLI OLARAK BURADA YOK: basamak_karisikligi, ondalik_kaymasi,
-    dusuk_ondalik_kaymasi, sistematik_yuvarlama -- bunlar tanımı gereği
-    matematiksel/kural bazlı doğrulamadan kaçan, sadece üretici tarafında
-    etiketlenmesi gereken "sinsi" anomalilerdir. Ayrıca fatura_no_tekrari
-    ve VKN-firma tutarlılığı da YOK -- bunlar tek bir faturaya değil,
-    faturalar ARASI ilişkiye bakar, bu fonksiyonun kapsamı dışında.
+    ondalik_kaymasi / dusuk_ondalik_kaymasi ARTIK BURADA yakalanır: bu iki
+    "fat-finger" anomalisi kalem içi matematiği bozmaz (hesap kontrollerini
+    tetiklemez) ama birim fiyatı büyüklük sırası olarak kaydırır; cömert bir
+    fiyat-makullüğü bandıyla (kalem_ondalik_kaymasi_yukari_mi /
+    kalem_ondalik_kaymasi_asagi_mi) KABA kaymalar geri kazanılır. Dar bantta
+    kalan küçük kaymalar yine sadece üretici tarafında
+    etiketli kalır (bkz. o fonksiyonun notu).
+
+    KASITLI OLARAK BURADA YOK: basamak_karisikligi, sistematik_yuvarlama --
+    bunlar tanımı gereği matematiksel/kural bazlı doğrulamadan kaçan, sadece
+    üretici tarafında etiketlenmesi gereken "sinsi" anomalilerdir. Ayrıca
+    fatura_no_tekrari ve VKN-firma tutarlılığı da YOK -- bunlar tek bir faturaya
+    değil, faturalar ARASI ilişkiye bakar, bu fonksiyonun kapsamı dışında.
     """
     turler: set[str] = set()
     izinli_kategoriler = IS_KOLU_KATEGORILERI.get(fatura.is_kolu, [])
@@ -250,6 +320,10 @@ def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
             turler.add("is_kolu_kategori_uyumsuzlugu")
         if kalem_yasakli_kategoride_mi(kalem):
             turler.add("yasakli_kategori")
+        if kalem_ondalik_kaymasi_yukari_mi(kalem):
+            turler.add("ondalik_kaymasi")
+        if kalem_ondalik_kaymasi_asagi_mi(kalem):
+            turler.add("dusuk_ondalik_kaymasi")
         # if kalem_limit_asimi_mi(kalem): şimdilik pasif kalsın şirket bazlı limit entegrasyonu yapılabilir.
         #     turler.add("limit_asimi")
 
@@ -308,8 +382,8 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
     ayni_ad_farkli_vkn = vkn_firma_hatalari["ayni_ad_farkli_vkn"] 
 
     fatura_hatalari: dict[int, dict] = {}   # artik indeks bazli önceden fatura no key di tekrari halinde eski fatura nonun üstüne yazilacakti, bu yüzden dict[int, dict] tipinde
-    fahis_fiyat_detaylari: list[dict] = []    # yeni
-    dusuk_fiyat_detaylari: list[dict] = []    # yeni
+    ondalik_kaymasi_detaylari: list[dict] = []        # fat-finger yukarı yönlü kayma
+    dusuk_ondalik_kaymasi_detaylari: list[dict] = []  # fat-finger aşağı yönlü kayma
     yasakli_kategori_detaylari: list[dict] = []
     limit_asimi_detaylari: list[dict] = []
     is_kolu_uyumsuzlugu_sayisi = 0
@@ -333,8 +407,10 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
                     yasakli_kategori_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
                 elif hata.startswith("LIMIT_ASIMI:"):
                     limit_asimi_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
-                elif hata.startswith("DUSUK_FIYAT:"):
-                    dusuk_fiyat_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
+                elif hata.startswith("ONDALIK_KAYMASI:"):
+                    ondalik_kaymasi_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
+                elif hata.startswith("DUSUK_ONDALIK_KAYMASI:"):
+                    dusuk_ondalik_kaymasi_detaylari.append({"fatura_no": fatura.fatura_no, "detay": hata})
                 elif hata.startswith("IS_KOLU_UYUMSUZLUGU:"):
                     is_kolu_uyumsuzlugu_sayisi += 1
 
@@ -351,10 +427,10 @@ def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
         "limit_asimi_sayisi": len(limit_asimi_detaylari),                # yeni
         "limit_asimi_detaylari": limit_asimi_detaylari,                  # yeni
         "is_kolu_uyumsuzlugu_sayisi": is_kolu_uyumsuzlugu_sayisi,        # yeni
-        "fahis_fiyat_sayisi": len(fahis_fiyat_detaylari),        # yeni
-        "fahis_fiyat_detaylari": fahis_fiyat_detaylari,          # yeni
-        "dusuk_fiyat_sayisi": len(dusuk_fiyat_detaylari),        # yeni
-        "dusuk_fiyat_detaylari": dusuk_fiyat_detaylari,          # yeni
+        "ondalik_kaymasi_sayisi": len(ondalik_kaymasi_detaylari),               # fat-finger yukarı
+        "ondalik_kaymasi_detaylari": ondalik_kaymasi_detaylari,                 # fat-finger yukarı
+        "dusuk_ondalik_kaymasi_sayisi": len(dusuk_ondalik_kaymasi_detaylari),   # fat-finger aşağı
+        "dusuk_ondalik_kaymasi_detaylari": dusuk_ondalik_kaymasi_detaylari,     # fat-finger aşağı
     }
 
 
@@ -400,16 +476,16 @@ def raporu_yazdir(rapor: dict) -> None:
         for detay in rapor["limit_asimi_detaylari"][:5]:
             print(f"    [{detay['fatura_no']}] {detay['detay']}")
     
-    print(f"  Fahiş Fiyat İhlali           : {rapor.get('fahis_fiyat_sayisi', 0)}")
-    if rapor.get("fahis_fiyat_detaylari"):
-        print("  ⚠️  Fahiş fiyat örnekleri:")
-        for detay in rapor["fahis_fiyat_detaylari"][:5]:
+    print(f"  Ondalık Kayması (Yüksek)     : {rapor.get('ondalik_kaymasi_sayisi', 0)}")
+    if rapor.get("ondalik_kaymasi_detaylari"):
+        print("  ⚠️  Ondalık kayması (yukarı) örnekleri:")
+        for detay in rapor["ondalik_kaymasi_detaylari"][:5]:
             print(f"    [{detay['fatura_no']}] {detay['detay']}")
 
-    print(f"  Düşük Fiyat İhlali           : {rapor.get('dusuk_fiyat_sayisi', 0)}")
-    if rapor.get("dusuk_fiyat_detaylari"):
-        print("  ⚠️  Düşük fiyat örnekleri:")
-        for detay in rapor["dusuk_fiyat_detaylari"][:5]:
+    print(f"  Ondalık Kayması (Düşük)      : {rapor.get('dusuk_ondalik_kaymasi_sayisi', 0)}")
+    if rapor.get("dusuk_ondalik_kaymasi_detaylari"):
+        print("  ⚠️  Ondalık kayması (aşağı) örnekleri:")
+        for detay in rapor["dusuk_ondalik_kaymasi_detaylari"][:5]:
             print(f"    [{detay['fatura_no']}] {detay['detay']}")
 
     print(f"  İş Kolu-Kategori Uyumsuzluğu : {rapor.get('is_kolu_uyumsuzlugu_sayisi', 0)}")
