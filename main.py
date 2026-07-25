@@ -130,12 +130,6 @@ def main():
         if otonom_turler:
             f.anomali_turleri = list(set(f.anomali_turleri) | otonom_turler)
             f.is_anomali = True
-        
-    for f in fatura_nesneleri:
-        otonom_turler = kural_ihlali_turlerini_tespit_et(f)
-        if otonom_turler:
-            f.anomali_turleri = list(set(f.anomali_turleri) | otonom_turler)
-            f.is_anomali = True
 
     # Açıklama kategorisi ataması, anomali_turleri TAMAMEN belirlendikten
     # (union etiketleme bittikten) SONRA yapılmalı -- aksi halde
