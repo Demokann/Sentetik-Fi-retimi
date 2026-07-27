@@ -47,7 +47,9 @@ def main():
     with open(args.etiket_json, "r", encoding="utf-8") as f:
         etiketler = json.load(f)
 
-    etiket_map = {e["fatura_no"]: e for e in etiketler}
+    # Anahtar fatura_no DEĞİL kayit_id: mukerrer_fis_yukleme / fatura_no_cakismasi
+    # anomalilerinde aynı fatura_no iki kayıtta bulunur ve etiketleri FARKLIDIR.
+    etiket_map = {e["kayit_id"]: e for e in etiketler}
 
     if "aciklama_kategorisi" not in etiketler[0]:
         print("HATA: etiketler.json'da aciklama_kategorisi yok.")
@@ -55,7 +57,7 @@ def main():
 
     kategori_havuzlari: dict[str, list[dict]] = {}
     for fatura in faturalar:
-        etiket = etiket_map.get(fatura["fatura_no"])
+        etiket = etiket_map.get(fatura["kayit_id"])
         if etiket is None:
             continue
         kategori_havuzlari.setdefault(etiket["aciklama_kategorisi"], []).append(fatura)
@@ -64,7 +66,7 @@ def main():
     for kategori, havuz in kategori_havuzlari.items():
         random.shuffle(havuz)
         for fatura in havuz[: args.per_kategori]:
-            secilenler.append((fatura, etiket_map[fatura["fatura_no"]]))
+            secilenler.append((fatura, etiket_map[fatura["kayit_id"]]))
     random.shuffle(secilenler)
 
     islenecek_liste = secilenler[: args.limit]
@@ -132,6 +134,7 @@ def main():
 
                 if jsonl_dosya:
                     jsonl_dosya.write(json.dumps({
+                        "kayit_id": fatura["kayit_id"],
                         "fatura_no": fatura["fatura_no"],
                         "aciklama_metni": metin,
                         "aciklama_kategorisi": kategori,

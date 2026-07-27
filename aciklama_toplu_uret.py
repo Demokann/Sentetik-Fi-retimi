@@ -41,7 +41,7 @@ def durum_kaydet(dizin: Path, durum: dict) -> None:
 
 
 def cikti_yukle(yol: Path) -> dict:
-    """Varsa daha önce üretilmiş çıktıları (fatura_no -> kayıt) yükler."""
+    """Varsa daha önce üretilmiş çıktıları (kayit_id -> kayıt) yükler."""
     if yol.exists():
         with open(yol, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -117,7 +117,7 @@ def main():
             if _kat in kabul_token_setleri and _m:
                 kabul_token_setleri[_kat].append(_token_set(_m))
                 kategori_metinleri[_kat].append(_m)
-        kalanlar = [f for f in faturalar if f["fatura_no"] not in cikti]
+        kalanlar = [f for f in faturalar if f["kayit_id"] not in cikti]
 
         print(f"=== {batch['dosya']}: {len(faturalar)} fatura, {len(cikti)} zaten üretilmiş, {len(kalanlar)} kaldı ===")
 
@@ -139,7 +139,7 @@ def main():
                 }
                 for future in as_completed(futures):
                     fatura, _etiket, metin, hata, ihlaller, deneme_sayisi = future.result()
-                    fno = fatura["fatura_no"]
+                    fno = fatura["kayit_id"]
                     kategori = fatura["aciklama_kategorisi"]
 
                     if hata or metin is None:
@@ -238,7 +238,7 @@ def _md_yaz(md_yolu: Path, faturalar: list[dict], cikti: dict, model: str) -> No
     with open(md_yolu, "w", encoding="utf-8") as f:
         f.write(f"# Ollama ({model}) — {md_yolu.stem}\n\n---\n\n")
         for idx, fatura in enumerate(faturalar, 1):
-            kayit = cikti.get(fatura["fatura_no"])
+            kayit = cikti.get(fatura["kayit_id"])
             if not kayit:
                 continue
             uyari = ""

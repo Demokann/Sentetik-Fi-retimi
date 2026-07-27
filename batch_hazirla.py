@@ -45,6 +45,7 @@ def batch_kaydi_olustur(fatura: dict, etiket: dict, aciklama_kategorisi_override
     kalibre) değer yerine bu batch'e özel yeniden atanmış kategori yazılır --
     etiket dosyası DEĞİŞMEZ, sadece bu kayıtta override edilir."""
     return {
+        "kayit_id": fatura["kayit_id"],   # boru hattinin BENZERSIZ anahtari
         "fatura_no": fatura["fatura_no"],
         "satici_unvan": fatura["satici_unvan"],
         "kalemler": fatura["kalemler"],
@@ -79,7 +80,7 @@ def dengeli_ornekle(
 
 # ---------------------------------------------------------------------------
 # Kota bazlı (anomali_turleri) seçim -- 75k'lik geçerli havuzdan ~20k'lik alt
-# küme çıkarırken rastgele örneklemenin nadir türleri (ör. fatura_no_tekrari,
+# küme çıkarırken rastgele örneklemenin nadir türleri (ör. mukerrer_fis_yukleme,
 # ~1000 mevcut) ezmesini önler. dengeli_ornekle (yukarıda) aciklama_kategorisi
 # (4 kova) bazında dengeler; bu fonksiyon bir kat daha temelde, ham
 # anomali_turleri (11 tür, union etiketleme sonucu) bazında dengeler --
@@ -273,6 +274,7 @@ def anomali_turu_kotali_sec(
     temiz_orani_min: float = 0.70,
     temiz_orani_max: float = 0.75,
     hedef_kategori_oranlari: dict[str, float] | None = None,
+    kategori_override: bool = False,
     seed: int = 42,
 ) -> tuple[list[dict], dict]:
     """
@@ -301,8 +303,11 @@ def anomali_turu_kotali_sec(
         hedef_kategori_oranlari = VARSAYILAN_KATEGORI_HEDEF_ORANLARI
     rnd = random.Random(seed)
 
-    etiket_map = {e["fatura_no"]: e for e in etiketler}
-    fatura_map = {f["fatura_no"]: f for f in faturalar}
+    # DİKKAT: anahtar fatura_no DEĞİL kayit_id. fatura_no, mukerrer_fis_yukleme /
+    # fatura_no_cakismasi anomalilerinde kasitli olarak tekrar eder; fatura_no ile
+    # anahtarlarsak çiftin biri sessizce DÜŞER ve tek metin iki kayda yazilir.
+    etiket_map = {e["kayit_id"]: e for e in etiketler}
+    fatura_map = {f["kayit_id"]: f for f in faturalar}
 
     anomalili_no = [fno for fno, e in etiket_map.items() if e["is_anomali"]]
     temiz_no = [fno for fno, e in etiket_map.items() if not e["is_anomali"]]
@@ -392,9 +397,22 @@ def anomali_turu_kotali_sec(
     tum_secilen_no = list(secilen_anomalili) + secilen_temiz
     rnd.shuffle(tum_secilen_no)
 
-    yeni_kategoriler, kategori_override_sayisi = _kategori_kotali_yeniden_ata(
-        tum_secilen_no, etiket_map, hedef_kategori_oranlari, rnd
-    )
+    # KATEGORİ OVERRIDE VARSAYILAN OLARAK KAPALI (bilinçli karar).
+    # `_kategori_kotali_yeniden_ata` batch kompozisyonunu 50/20/20/10'a çekmek için
+    # aciklama_kategorisi'ni yeniden atıyordu; ölçüldü (20k): 4107 fatura (%20.5)
+    # override ediliyordu -- en sık "temiz + yeterli -> manipulatif" (1241 fatura).
+    # Bu, generators/aciklama_uretici.ACIKLAMA_KATEGORI_ORANLARI'nın araştırmayla
+    # kalibre edilmiş anomali↔kategori korelasyonunu bozar; ayrıca override edilen
+    # kategori etiket dosyasına GERİ YAZILMADIĞI için (aciklama_birlestir.py bu alana
+    # hiç dokunmaz) metin ile etiket/onay_durumu çelişir hale gelirdi.
+    # Açıkça istenirse --kategori-override ile açılabilir.
+    if kategori_override:
+        yeni_kategoriler, kategori_override_sayisi = _kategori_kotali_yeniden_ata(
+            tum_secilen_no, etiket_map, hedef_kategori_oranlari, rnd
+        )
+    else:
+        yeni_kategoriler = {fno: etiket_map[fno]["aciklama_kategorisi"] for fno in tum_secilen_no}
+        kategori_override_sayisi = 0
     secilenler = [
         batch_kaydi_olustur(fatura_map[fno], etiket_map[fno], aciklama_kategorisi_override=yeni_kategoriler[fno])
         for fno in tum_secilen_no
@@ -503,6 +521,12 @@ def main():
     parser.add_argument("--kategori-oran-yetersiz", type=float, default=VARSAYILAN_KATEGORI_HEDEF_ORANLARI["yetersiz"], help="[kota modu] aciklama_kategorisi hedef oranı: yetersiz")
     parser.add_argument("--kategori-oran-manipulatif", type=float, default=VARSAYILAN_KATEGORI_HEDEF_ORANLARI["manipulatif"], help="[kota modu] aciklama_kategorisi hedef oranı: manipulatif")
     parser.add_argument("--kategori-oran-ai-uretimi", type=float, default=VARSAYILAN_KATEGORI_HEDEF_ORANLARI["ai_uretimi"], help="[kota modu] aciklama_kategorisi hedef oranı: ai_uretimi")
+    parser.add_argument(
+        "--kategori-override", action="store_true",
+        help="[kota modu] aciklama_kategorisi'ni --kategori-oran-* hedefine göre YENİDEN ATA. "
+             "VARSAYILAN KAPALI: override, aciklama_uretici'nin kalibre edilmiş anomali↔kategori "
+             "korelasyonunu bozar ve etiket dosyasına geri yazılmadığı için metinle çelişir.",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Tekrarlanabilirlik için rastgelelik tohumu")
     args = parser.parse_args()
 
@@ -537,6 +561,7 @@ def main():
             temiz_orani_min=args.temiz_orani_min,
             temiz_orani_max=args.temiz_orani_max,
             hedef_kategori_oranlari=hedef_kategori_oranlari,
+            kategori_override=args.kategori_override,
             seed=args.seed,
         )
         _kota_raporu_yazdir(rapor)
@@ -544,7 +569,7 @@ def main():
         # Kategori bazında havuzları kur (pilot'taki join mantığının aynısı)
         kategori_havuzlari: dict[str, list[dict]] = {}
         for fatura in faturalar:
-            etiket = etiket_map.get(fatura["fatura_no"])
+            etiket = etiket_map.get(fatura["kayit_id"])
             if etiket is None:
                 continue
             kategori_havuzlari.setdefault(etiket["aciklama_kategorisi"], []).append(fatura)
@@ -560,7 +585,7 @@ def main():
         for kategori, faturalar_alt in secilen_kategori.items():
             print(f"      {kategori:12s}: {len(faturalar_alt)}")
             for fatura in faturalar_alt:
-                secilenler.append(batch_kaydi_olustur(fatura, etiket_map[fatura["fatura_no"]]))
+                secilenler.append(batch_kaydi_olustur(fatura, etiket_map[fatura["kayit_id"]]))
 
         random.shuffle(secilenler)
 

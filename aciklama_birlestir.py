@@ -20,13 +20,16 @@ VARSAYILAN_CIKTI_DIZINI = "data/aciklama"
 
 
 def aciklama_haritasi_kur(dizin: Path) -> dict[str, str]:
-    """batch_*_ciktilar.json dosyalarından fatura_no -> aciklama_metni haritası."""
+    """batch_*_ciktilar.json dosyalarından kayit_id -> aciklama_metni haritası.
+
+    Anahtar fatura_no DEĞİL: mukerrer_fis_yukleme / fatura_no_cakismasi anomalilerinde
+    ayni fatura_no iki kayitta bulunur ve her birinin KENDİ açiklamasi vardir."""
     harita: dict[str, str] = {}
     for yol in sorted(glob.glob(str(dizin / "batch_*_ciktilar.json"))):
         with open(yol, "r", encoding="utf-8") as f:
             cikti = json.load(f)
-        for fno, kayit in cikti.items():
-            harita[fno] = kayit["aciklama_metni"]
+        for kid, kayit in cikti.items():
+            harita[kid] = kayit["aciklama_metni"]
     return harita
 
 
@@ -54,7 +57,7 @@ def main():
     eslesen = 0
     sonuc = []
     for fatura in faturalar:
-        metin = harita.get(fatura["fatura_no"])
+        metin = harita.get(fatura["kayit_id"])
         if metin is not None:
             fatura["aciklama_metni"] = metin
             eslesen += 1
@@ -71,7 +74,7 @@ def main():
     print(f"[+] {eslesen} faturaya aciklama_metni eklendi.")
     print(f"[+] Toplam {len(sonuc)} fatura yazıldı -> {args.output_json}")
     if eslesen < len(harita):
-        print(f"[!] UYARI: {len(harita) - eslesen} açıklamanın fatura_no'su faturalar.json'da eşleşmedi.")
+        print(f"[!] UYARI: {len(harita) - eslesen} açıklamanın kayit_id'si faturalar.json'da eşleşmedi.")
 
 
 if __name__ == "__main__":
