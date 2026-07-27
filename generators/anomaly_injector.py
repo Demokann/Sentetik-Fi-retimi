@@ -27,10 +27,38 @@ def gelecek_tarihli_anomali_uret(fatura: Fatura) -> Fatura:
 # 2. Geçersiz Kimlik No
 
 def gecersiz_kimlik_no_anomali_uret(fatura: Fatura) -> Fatura:
-    """Satici kimlik numarasini checksum'i tutmayan rastgele bir sayiyla değiştirir."""
-    hane_sayisi = len(fatura.satici_vkn)
-    yanlis_kimlik = "".join(str(random.randint(0, 9)) for _ in range(hane_sayisi))
-    fatura.satici_vkn = yanlis_kimlik
+    """Satici kimlik numarasinin SON hanesini (checksum hanesi) bozar.
+
+    Eskiden tüm numara rastgele üretiliyordu; rastgele bir sayinin checksum'a
+    tesadüfen UYMA olasiligi ~1/10 olduğu için üretilen faturalarin %9.4'ünde
+    'gecersiz_kimlik_no' etiketi vardi ama kimlik numarasi GEÇERLİYDİ -- yani
+    etiket var, tespit edilebilir sinyal yok: öğrenilemez saf etiket gürültüsü
+    (100k koşusunda 2106 etiketin 198'i).
+
+    Yöntem: son hane (checksum hanesi) için 10 adayin hepsi denenir, checksum'a
+    UYMAYANLAR arasindan rastgele biri seçilir. Böylece geçersizlik, gelen
+    numaranin başlangiçta geçerli olup olmadigindan BAĞIMSIZ olarak garanti edilir
+    (yalnizca "son haneyi kaydir" deseydik, girdi zaten bozuksa yeni hane tesadüfen
+    doğru checksum'a denk gelebilirdi). Checksum algoritmasi burada tekrar
+    YAZILMAZ; kimlik_no_dogrula hem VKN (10 hane) hem TCKN (11 hane) ayrimini
+    kendisi yapar.
+
+    Ayrica tek haneli bozulma, gerçek bir veri giriş hatasina (typo) tüm numaranin
+    rastgele değişmesinden daha yakindir.
+
+    NOT: import FONKSİYON İÇİNDE -- validators zaten bu modülden
+    ANOMALI_FONKSIYONLARI'ni import ettiği için modül seviyesinde dairesel olurdu."""
+    from validators import kimlik_no_dogrula
+
+    kimlik = fatura.satici_vkn
+    govde = kimlik[:-1]
+    adaylar = [str(d) for d in range(10) if not kimlik_no_dogrula(govde + str(d))]
+    if adaylar:
+        fatura.satici_vkn = govde + random.choice(adaylar)
+    else:
+        # Teorik olarak ulaşilamaz (10 adayin en az 9'u geçersizdir); yine de
+        # sessizce yanliş etiket üretmemek için ek bir haneyi de bozalim.
+        fatura.satici_vkn = govde[:-1] + str((int(govde[-1]) + 1) % 10) + kimlik[-1]
     return fatura
 
 
@@ -336,6 +364,18 @@ def kdv_tutari_anomali_uret(fatura: Fatura) -> Fatura:
 # değil. Bu yüzden hem enjeksiyon hem tespit artık "ondalik_kaymasi" (yukarı) ve
 # "dusuk_ondalik_kaymasi" (aşağı) adlarını kullanır.
 
+# Ondalik kayma büyüklüğü AĞIRLIKLI seçilir (eskiden 10x/100x eşit olasilikliydi).
+# Gerçek fat-finger'da ondalik noktasi çoğunlukla TEK basamak kayar (1250.00 ->
+# 125.00); iki basamaklik kayma (1250.00 -> 12.50) daha nadirdir. 70/30 bunu
+# yansitir ve pozitif sinifin dağilimini gerçek veri giriş hatalarina yaklaştirir.
+_KAYMA_CARPANLARI = (Decimal("10"), Decimal("100"))
+_KAYMA_AGIRLIKLARI = (0.7, 0.3)
+
+
+def _kayma_carpani_sec() -> Decimal:
+    return random.choices(_KAYMA_CARPANLARI, weights=_KAYMA_AGIRLIKLARI, k=1)[0]
+
+
 def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
     """
     Fat-finger simülasyonu: rastgele bir kalemin birim_fiyat'ını 10x ya da 100x
@@ -347,7 +387,7 @@ def ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
     hedef_index = random.randrange(len(fatura.kalemler))
     kalem = fatura.kalemler[hedef_index]
 
-    kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
+    kayma_carpani = _kayma_carpani_sec()
     kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat * kayma_carpani)
 
     return fatura
@@ -363,7 +403,7 @@ def dusuk_ondalik_kaymasi_anomali_uret(fatura: Fatura) -> Fatura:
     hedef_index = random.randrange(len(fatura.kalemler))
     kalem = fatura.kalemler[hedef_index]
 
-    kayma_carpani = random.choice([Decimal("10"), Decimal("100")])
+    kayma_carpani = _kayma_carpani_sec()
     kalem.birim_fiyat = paraya_yuvarla(kalem.birim_fiyat / kayma_carpani)
 
     return fatura
@@ -391,16 +431,37 @@ ANOMALI_FONKSIYONLARI = {
 
     "genel_toplam": genel_toplam_anomali_uret,
     "footer_kismi": footer_kismi_anomali_uret,
-    # fatura_no_tekrari burada YOK: iki fatura arasinda çalişiyor, ayri ele aliniyor
+    # mukerrer_fis_yukleme / fatura_no_cakismasi burada YOK: iki fatura ARASINDA
+    # çalişiyorlar, fatura_no_tekrari_uygula() ile ayri ele aliniyorlar
 }
+
+
+# fatura_no çakişmasinda f2, f1'in HEADER kimlik alanlarini (vkn/unvan/is_kolu)
+# aynen devraldiği için, o alanlara bagli anomali etiketleri de senkronlanmali.
+# Yalnizca header kapsamli türler listelenir; kalem kapsamli türler f2'ye AİT DEĞİLDİR
+# (f2 kendi kalemlerini korur).
+HEADER_KAPSAMLI_ANOMALILER = ("gecersiz_kimlik_no",)
+
+# AYNI fatura no'ya sahip iki kayit İKİ FARKLI OLAYDAN doğabilir; ikisi de simüle
+# edilir çünkü model ayrimi öğrenmeli:
+#   1) mukerrer_fis_yukleme -- çalişan ayni fişi ikinci kez yüklüyor (BİLİNÇLİ
+#      kurnazlik, A grubu). Kayitlar yapisal olarak birebir ayni.
+#   2) fatura_no_cakismasi  -- satici iki FARKLI fişi ayni no ile kesmiş (satici
+#      numaralandirma hatasi, B grubu / teknik). Yalnizca header ortak.
+# Payi 1. senaryo lehine tutuyoruz: modelin yakalamasi istenen asil davraniş odur;
+# 2. senaryo zaten kalabalik olan teknik anomali sinifina bir ekleme.
+MUKERRER_YUKLEME_PAYI = 0.60
 
 
 def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> None:
     """
-    fatura_no_tekrari anomalisini `tekrar_sayisi` kadar farkli çift üzerinde
-    uygular. Her çift icin VKN'nin yani sira SATICI UNVANI da eşitlenir --
+    Ayni fatura_no'ya sahip `tekrar_sayisi` kadar çift üretir. DAĞITICIDIR: her çift
+    için MUKERRER_YUKLEME_PAYI olasilikla _mukerrer_fis_yukleme_uygula (S1, tam kopya,
+    A grubu), aksi halde _fatura_no_cakismasi_uygula (S2, yalniz header ortak, B grubu)
+    çağrilir. Ayni fatura no'ya sahip iki kayit iki FARKLI olaydan doğar; ikisi de
+    simüle edilir ki model ayrimi öğrenebilsin (bkz. MUKERRER_YUKLEME_PAYI). Her çift icin VKN'nin yani sira SATICI UNVANI da eşitlenir --
     aksi halde ayni VKN farkli unvanla eşleşmiş olur ki bu, kasitli
-    fatura_no_tekrari anomalisiyle karişan, istenmeyen ayri bir VKN-firma
+    ayni-fatura-no anomalisiyle karişan, istenmeyen ayri bir VKN-firma
     tutarsizligi üretir. Gerçek hayatta bir VKN her zaman tek bir firmaya
     ait olduğu icin unvan da eşitlenerek ilişki gerçekçi kaliyor.
     Ayrica ayni faturanin birden fazla çiftte kullanilmasini önlemek icin
@@ -438,15 +499,66 @@ def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> Non
         idx1, idx2 = random.sample(random.choice(uygun_gruplar), 2)
         f1, f2 = faturalar[idx1], faturalar[idx2]
 
-        f2.satici_vkn = f1.satici_vkn      # anomalinin gerçek sayilmasi için şart
-        f2.satici_unvan = f1.satici_unvan  # ayni VKN = ayni firma tutarliliğini korumak için şart
-        f2.is_kolu = f1.is_kolu            # aynı is_kolu (zaten eşit) -- değişmezi açıkça garanti et
-        faturalar[idx2] = fatura_no_tekrari_anomali_uret(f2, f1.fatura_no)
-        faturalar[idx2].is_anomali = True
-        faturalar[idx2].anomali_turleri = faturalar[idx2].anomali_turleri + ["fatura_no_tekrari"]
+        if random.random() < MUKERRER_YUKLEME_PAYI:
+            faturalar[idx2] = _mukerrer_fis_yukleme_uygula(f1, f2)
+        else:
+            faturalar[idx2] = _fatura_no_cakismasi_uygula(f1, f2)
 
         kullanilmis_indeksler.add(idx1)
         kullanilmis_indeksler.add(idx2)
+
+
+def _mukerrer_fis_yukleme_uygula(f1: Fatura, f2: Fatura) -> Fatura:
+    """SENARYO 1 -- çalişan AYNI fişi ikinci kez yüklüyor (bilinçli kurnazlik, A grubu).
+
+    f2, f1'in TAM kopyasi olur: header (unvan/VKN/is_kolu) + TARİH + KALEMLER +
+    toplamlar. Yani iki kayit yapisal olarak birebir aynidir; tespit gerçek
+    sistemlerdeki gibi (vkn, fatura_no, tutar, kalemler) eşleşmesiyle yapilir.
+
+    Etiketler de f1'inkilerle ayni olur -- f2'nin eski kalemleri (ve onlara bagli
+    etiketleri) artik yok, üzerlerine yazildi.
+
+    NOT: aciklama_kategorisi ve aciklama_metni PAYLAŞILMAZ. Ayni fişi iki kez
+    yükleyen çalişan ikinci seferde sifirdan bir not yazar; birebir ayni cümleyi
+    beklemek gerçekçi olmaz. Bu ayni zamanda veri setini zorlaştirir: yapisal
+    alanlar birebir ayni, metin farkli -> model mükerrerliği METİNDEN değil
+    yapidan öğrenmek zorunda kalir."""
+    kopya = f1.model_copy(deep=True)
+    kopya.is_anomali = True
+    kopya.anomali_turleri = list(f1.anomali_turleri) + ["mukerrer_fis_yukleme"]
+    return kopya
+
+
+def _fatura_no_cakismasi_uygula(f1: Fatura, f2: Fatura) -> Fatura:
+    """SENARYO 2 -- satici iki FARKLI fişi ayni no ile kesmiş (numaralandirma hatasi,
+    B grubu / teknik).
+
+    f2 yalnizca HEADER'i devralir (unvan + VKN + is_kolu); tarih, kalemler, satir ve
+    genel toplamlar KENDİSİNİN kalir. Çalişanin görüş alani dişinda bir satici
+    hatasidir, dolayisiyla davranişsal değil teknik bir anomalidir.
+
+    İki kayit farkli kalemler taşidiği için açiklama kategorileri de metinleri de
+    BAĞIMSIZDIR (her biri kendi anomali profiline göre atanir)."""
+    f2.satici_vkn = f1.satici_vkn      # anomalinin gerçek sayilmasi için şart
+    f2.satici_unvan = f1.satici_unvan  # ayni VKN = ayni firma tutarliliğini korumak için şart
+    f2.is_kolu = f1.is_kolu            # aynı is_kolu (zaten eşit) -- değişmezi açıkça garanti et
+    f2 = fatura_no_tekrari_anomali_uret(f2, f1.fatura_no)
+    f2.is_anomali = True
+    # HEADER-KAPSAMLI anomali etiketleri f1 ile SENKRONLANIR (tek yönlü devralma
+    # DEĞİL): f2 yukarida f1'in kimlik alanlarini AYNEN kopyaladiği için, bu
+    # alanlara bagli etiketlerin de f1'inkiyle birebir ayni olmasi gerekir.
+    #   - f1 bozuksa  -> f2 de bozuk VKN taşir, etiketi EKLENİR. (Aksi halde f2
+    #     etiketsiz bozuk VKN'yle dolaşir; VKN-firma muafiyetine
+    #     (validators.KIMLIK_MUAF_ANOMALILER) giremediği için sahte "ayni ad /
+    #     farkli VKN" çelişkisi üretiyordu -- 100k'da 1 vaka: 'Burcu Avm'.)
+    #   - f1 geçerliyse -> f2'nin kendi bozuk VKN'si ÜZERİNE YAZILDI, artik geçerli;
+    #     etiketi KALDIRILIR. (20k'da 4 vaka: etiket var, sinyal yok.)
+    # KALEM-kapsamli etiketler (yasakli_kategori, satir_toplami, ondalik_kaymasi...)
+    # BİLEREK dokunulmaz -- f2 kendi kalemlerini korur, o etiketler ona aittir.
+    turler = [t for t in f2.anomali_turleri if t not in HEADER_KAPSAMLI_ANOMALILER]
+    turler += [t for t in HEADER_KAPSAMLI_ANOMALILER if t in f1.anomali_turleri]
+    f2.anomali_turleri = turler + ["fatura_no_cakismasi"]
+    return f2
 
 def karisik_veri_seti_uret(adet: int, anomali_orani: float) -> list[Fatura]:
     """

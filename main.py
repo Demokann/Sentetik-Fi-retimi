@@ -8,12 +8,16 @@ from validators import (
 )
 from generators.field_generator import rastgele_fatura
 from generators.anomaly_injector import karisik_veri_seti_uret
-from generators.aciklama_uretici import veri_setine_aciklama_kategorisi_ata
+from generators.aciklama_uretici import (
+    veri_setine_aciklama_kategorisi_ata,
+    veri_setine_onay_durumu_ata,
+)
 
 
 def fatura_to_dict(fatura) -> dict:
     """Pydantic modelini JSON-uyumlu dict'e çevirir, hesaplanan alanlari da ekler."""
     return {
+        "kayit_id": fatura.kayit_id,   # benzersiz satir anahtari (join icin; ÖZELLİK DEĞİL)
         "fatura_no": fatura.fatura_no,
         "fatura_tarihi": fatura.fatura_tarihi,
         "satici_vkn": fatura.satici_vkn,
@@ -54,10 +58,14 @@ def etiket_to_dict(fatura) -> dict:
     olarak kullanilmali.
     """
     return {
+        "kayit_id": fatura.kayit_id,
         "fatura_no": fatura.fatura_no,
         "is_anomali": fatura.is_anomali,
         "anomali_turleri": fatura.anomali_turleri,
         "aciklama_kategorisi": fatura.aciklama_kategorisi,
+        # onaylandi / gozden_gecirilecek / onaylanmadi -- (anomali_grubu ×
+        # aciklama_kategorisi)'nden türetilmiş iş-seviyesi ground truth.
+        "onay_durumu": fatura.onay_durumu,
     }
 
 
@@ -120,6 +128,11 @@ def main():
     # Tek seferde üret, hem doğrulama hem export bu tek listeyi kullansin
     fatura_nesneleri = karisik_veri_seti_uret(args.count, args.anomali_orani)
 
+    # Benzersiz satir anahtari. fatura_no benzersiz olmadigi icin (mukerrer_fis_yukleme /
+    # fatura_no_cakismasi) aciklama boru hatti bununla anahtarlanir -- bkz. schema.Fatura.
+    for i, f in enumerate(fatura_nesneleri):
+        f.kayit_id = f"K{i:07d}"
+
 
     # Union (Additive) Etiketleme: üreticinin enjekte ettiği anomali
     # etiketlerine, doğrulayıcının BAĞIMSIZ tespit ettiği kural ihlallerini
@@ -136,6 +149,11 @@ def main():
     # ONCELIK_SIRASI eksik bilgiyle çalışır.
     veri_setine_aciklama_kategorisi_ata(fatura_nesneleri)
 
+    # onay_durumu, aciklama_kategorisi'nden TÜRETİLİR -> mutlaka ondan SONRA.
+    # (anomali_grubu × aciklama_kategorisi) karar tablosu için bkz.
+    # generators/aciklama_uretici.onay_durumu_belirle.
+    veri_setine_onay_durumu_ata(fatura_nesneleri)
+
     # VKN-firma tutarlilik GÜVENLİK KONTROLÜ (artık veri SİLMEZ).
     # Firma registry mimarisiyle (firma_registry_olustur.py) her ad→sabit VKN ve
     # her VKN→sabit ad garantisi İNŞA gereği sağlanır; dolayısıyla bu kontrol
@@ -143,15 +161,24 @@ def main():
     # (100k üretimde ~25k fatura eleniyordu, fatura_no seti nondeterministik oluyordu);
     # registry bu sorunu ortadan kaldırdığı için artık silmiyoruz -- sadece beklenmedik
     # bir çelişki çıkarsa (registry bütünlüğü bozulmuşsa) GÜRÜLTÜLÜ uyarı veriyoruz.
-    # fatura_no_tekrari anomalisi VKN+unvan'ı BİRLİKTE eşitlediği için çelişki üretmez;
+    # Ayni-fatura-no anomalileri (mukerrer_fis_yukleme / fatura_no_cakismasi) VKN+unvan'ı
+    # BİRLİKTE eşitlediği için çelişki üretmez;
     # yine de muafiyeti koruyoruz (ör. gecersiz_kimlik_no rastgele VKN çakışması).
+    #
+    # DÜZELTME: `korunan_adlar` eskiden yalnız ayni-fatura-no türlerini kapsıyordu ve
+    # gecersiz_kimlik_no ADI muaf tutmuyordu. O anomali VKN'yi bozup UNVANI aynı
+    # bıraktığı için, aynı firmanın gerçek VKN'li diğer faturalarıyla sahte bir
+    # "aynı ad / farklı VKN" çelişkisi doğuyordu (100k koşuda 1208 ad, 6599 fatura --
+    # 4560'ı hiç anomalisi olmayan tertemiz fatura). Etiketlere hiç sızmıyordu ama
+    # raporda "Hatalı Fatura"yı gerçek anomali sayısının ~4560 üstüne çıkarıyordu.
+    # Aynı muafiyet validators.KIMLIK_MUAF_ANOMALILER ile rapor tarafında da var.
     korunan_vknler = {
         f.satici_vkn for f in fatura_nesneleri
-        if "fatura_no_tekrari" in f.anomali_turleri or "gecersiz_kimlik_no" in f.anomali_turleri
+        if not {"fatura_no_cakismasi", "mukerrer_fis_yukleme", "gecersiz_kimlik_no"}.isdisjoint(f.anomali_turleri)
     }
     korunan_adlar = {
         f.satici_unvan for f in fatura_nesneleri
-        if "fatura_no_tekrari" in f.anomali_turleri
+        if not {"fatura_no_cakismasi", "mukerrer_fis_yukleme", "gecersiz_kimlik_no"}.isdisjoint(f.anomali_turleri)
     }
 
     vkn_firma_hatalari = vkn_firma_tutarlilik_hatalarini_bul(fatura_nesneleri)

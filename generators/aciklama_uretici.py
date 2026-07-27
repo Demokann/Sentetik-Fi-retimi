@@ -1,5 +1,5 @@
 import random
-from schema import Fatura
+from schema import Fatura, anomali_grubu
 
 # 4 sabit açıklama kalite kategorisi. Bu modül asıl açıklama METNİNİ üretmiyor
 # (o adım ayrı, LLM/qwen3 ile yapılacak) -- sadece o metnin hangi "davranış
@@ -20,9 +20,12 @@ ACIKLAMA_KATEGORI_ORANLARI: dict[str, list[float]] = {
     "yasakli_kategori":                [35, 10, 45, 10],
     "is_kolu_kategori_uyumsuzlugu":    [15, 15, 55, 15],
     "limit_asimi":                     [30, 15, 40, 15],
-    "fatura_no_tekrari":               [10, 10, 50, 30],
+    "mukerrer_fis_yukleme":            [10, 10, 50, 30],
     "gelecek_tarihli":                 [40, 25, 20, 15],
     # B) Yapısal/teknik — çalışanın görüş alanı dışında, metinle zayıf korelasyon
+    # fatura_no_cakismasi: satıcının numaralandırma hatası -> çalışanın görüş
+    # alanı DIŞINDA, metinle korelasyonu zayıf; teknik dağılıma eşlenir.
+    "fatura_no_cakismasi":             [55, 30, 5, 10],
     "footer_kismi":                    [55, 30, 5, 10],
     "kdv_tutari":                      [55, 30, 5, 10],
     # "kdv_kategori_uyumsuzlugu":        [50, 30, 10, 10], mevzuat değişimden ötürü kaldırıldı.
@@ -54,7 +57,7 @@ VARSAYILAN_TEKNIK_ORAN = [55, 30, 5, 10]
 # fark edilmez" olana. Mantık: açıklamayı yazan kişi, faturadaki en yüksek
 # "bilinç düzeyi" gerektiren soruna göre davranır.
 ONCELIK_SIRASI = [
-    "fatura_no_tekrari",
+    "mukerrer_fis_yukleme",
     "yasakli_kategori",
     "limit_asimi",
     "is_kolu_kategori_uyumsuzlugu",
@@ -65,6 +68,7 @@ ONCELIK_SIRASI = [
     #"kdv_kategori_uyumsuzlugu",
     "kdv_tutari",
     "footer_kismi",
+    "fatura_no_cakismasi",
     "gecersiz_kimlik_no",
 ]
 
@@ -109,3 +113,57 @@ def veri_setine_aciklama_kategorisi_ata(faturalar: list[Fatura]) -> None:
     """Fatura listesindeki her faturaya (yerinde) aciklama_kategorisi atar."""
     for fatura in faturalar:
         fatura.aciklama_kategorisi = aciklama_kategorisi_belirle(fatura)
+
+
+# ---------------------------------------------------------------------------
+# ONAY DURUMU (admin/muhasebe tarafındaki sonuç) -- GROUND TRUTH
+# ---------------------------------------------------------------------------
+# `(anomali_grubu × aciklama_kategorisi)`'nden TÜRETİLİR; rastgelelik YOKTUR.
+#
+# Neden rastgele "karışım" değil: hiçbir gözlenebilir değişkene bağlı olmayan
+# rastgelelik saf ETİKET GÜRÜLTÜSÜdür -- yazı-turası öğrenilemez, yalnız ulaşılabilir
+# doğruluk tavanını düşürür. Gri bölge isteniyorsa karışım bir özelliğe bağlı olmalı;
+# burada o özellik anomalinin A/B grubudur (schema.A_GRUBU_ANOMALILER).
+#
+# Karar tablosu:
+#                 temiz              B-grubu (teknik)      A-grubu (davranışsal)
+#   yeterli       onaylandi          gozden_gecirilecek    onaylanmadi
+#   yetersiz      gozden_gecirilecek gozden_gecirilecek    onaylanmadi
+#   ai_uretimi    gozden_gecirilecek gozden_gecirilecek    onaylanmadi
+#   manipulatif   gozden_gecirilecek onaylanmadi           onaylanmadi
+#
+# Gerekçeler:
+#  - B-grubu + yeterli -> RED DEĞİL: hata OCR/sistem kaynaklı, çalışan düzgün açıklama
+#    yazmış; gerçek hayatta muhasebe düzeltip onaylar. (ondalik_kaymasi istisnası da
+#    doğal olarak buraya düşer, bkz. CLAUDE.md §4.)
+#  - manipulatif + temiz -> RED DEĞİL: sayılar temiz, yalnız dil şüpheli -> incelenir.
+#    (Aşırı savunmacı ama dürüst çalışanı cezalandırmamak için.)
+#  - A-grubu her kategoride RED: aykırılık çalışanın görüş alanında ve bilinçli.
+#
+# Böylece onay_durumu `is_anomali`'nin kopyası OLMAZ; "çalışan sorunu mu, veri sorunu
+# mu" eksenini kodlar.
+ONAY_DURUMLARI = ["onaylandi", "gozden_gecirilecek", "onaylanmadi"]
+
+
+def onay_durumu_belirle(anomali_turleri, aciklama_kategorisi: str) -> str:
+    """(anomali_turleri, aciklama_kategorisi) -> onay_durumu. Saf fonksiyon."""
+    grup = anomali_grubu(anomali_turleri)
+
+    if aciklama_kategorisi == "manipulatif":
+        # Temizde sayılar tutuyor -> red değil inceleme; anomaliyle birleşince red.
+        return "gozden_gecirilecek" if grup == "temiz" else "onaylanmadi"
+    if grup == "A":
+        return "onaylanmadi"
+    if grup == "B":
+        return "gozden_gecirilecek"
+    # temiz fatura: yalnız 'yeterli' onaylanır.
+    return "onaylandi" if aciklama_kategorisi == "yeterli" else "gozden_gecirilecek"
+
+
+def veri_setine_onay_durumu_ata(faturalar: list[Fatura]) -> None:
+    """Her faturaya (yerinde) onay_durumu atar.
+
+    DİKKAT: veri_setine_aciklama_kategorisi_ata'dan SONRA çağrılmalı -- kategori
+    girdilerden biridir. Union etiketleme de bitmiş olmalı (anomali_turleri kesin)."""
+    for fatura in faturalar:
+        fatura.onay_durumu = onay_durumu_belirle(fatura.anomali_turleri, fatura.aciklama_kategorisi)

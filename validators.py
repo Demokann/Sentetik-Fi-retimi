@@ -139,6 +139,16 @@ def kalem_limit_asimi_mi(kalem: FaturaKalemi) -> bool:
 # aksine).
 ONDALIK_KAYMASI_BANT_CARPANI = Decimal("5")
 
+# ALT yön için AYRI (daha geniş) çarpan. Sebep: fiyat dağılımı sağa çarpık olduğu
+# için `min / 5` eşiği doğal ucuz kalemlerin İÇİNE düşerken `max * 5` doğal
+# fiyatların çok üstünde kalıyordu -> union, doğal ucuz kalemleri toplayıp
+# dusuk_ondalik_kaymasi'ni şişiriyordu. Ölçüldü (100k): dusuk 1685 vs yukari 1249;
+# fazlaliğin tamami (400 fatura) `5x-10x altinda` şeridindeydi, yani asimetri 42x.
+# ÷10'a çikinca dusuk ~1285'e iner (asimetri ~1x). Enjekte edilen etiketler
+# KAYBOLMAZ (union additive; enjektörün ground truth'u ayrica durur) -- yalnizca
+# union'in doğal kuyruğu toplamasi durur.
+ONDALIK_KAYMASI_ALT_BANT_CARPANI = Decimal("10")
+
 
 def kalem_ondalik_kaymasi_yukari_mi(kalem: FaturaKalemi) -> bool:
     """
@@ -168,7 +178,7 @@ def kalem_ondalik_kaymasi_yukari_mi(kalem: FaturaKalemi) -> bool:
 def kalem_ondalik_kaymasi_asagi_mi(kalem: FaturaKalemi) -> bool:
     """
     Kalemin birim fiyatı, kategorisinin makul bandının (FIYAT_ARALIGI_GENEL alt
-    sınırı) ONDALIK_KAYMASI_BANT_CARPANI katı ALTINDA mı? Altındaysa AŞAĞI yönlü
+    sınırı) ONDALIK_KAYMASI_ALT_BANT_CARPANI katı ALTINDA mı? Altındaysa AŞAĞI yönlü
     fat-finger ondalık kayması (÷10/÷100) şüphesi -> 'dusuk_ondalik_kaymasi'
     etiketi. Yukarı yöndeki eşdeğerinin (kalem_ondalik_kaymasi_yukari_mi) aynı
     bilinçli tavizi geçerlidir.
@@ -177,19 +187,39 @@ def kalem_ondalik_kaymasi_asagi_mi(kalem: FaturaKalemi) -> bool:
     if aralik is None:
         return False
     low = Decimal(str(aralik[0]))
-    return kalem.birim_fiyat < low / ONDALIK_KAYMASI_BANT_CARPANI
+    return kalem.birim_fiyat < low / ONDALIK_KAYMASI_ALT_BANT_CARPANI
 
 
 #6. VKN-Firma Tutarlilik Kontrolü (Ayni VKN farkli unvan, ya da ayni unvan farkli VKN)
+# Bu anomaliler fatura ÖRNEĞİNİN kimlik alanini mutasyona uğratir (registry'yi
+# DEĞİL): gecersiz_kimlik_no satici VKN'sini bilerek bozar. Ayni firmanin diğer
+# faturalari GERÇEK VKN'siyle durduğu için, tutarlilik haritasi bunu "ayni ad /
+# farkli VKN" çelişkisi sanar -- oysa kasitli bir anomalidir ve kendi etiketi vardir.
+# Ölçüldü: 100k'lik koşuda 1208 firma adi bu yüzden çelişkili görünüyor ve
+# bunlarin 4560'i HİÇ anomalisi olmayan tertemiz fatura ("komşu" etkisi); rapordaki
+# "Hatali Fatura" sayisini gerçek anomali sayisinin ~4560 üstüne çikariyordu.
+# Bu faturalar HER İKİ haritadan da muaf tutulur: bozuk VKN tesadüfen başka bir
+# firmanin gerçek VKN'siyle çakişirsa asil önemli yönde (ayni_vkn_farkli_ad) da
+# sahte alarm doğardi.
+KIMLIK_MUAF_ANOMALILER = ("gecersiz_kimlik_no",)
+
+
 def vkn_firma_tutarlilik_hatalarini_bul(faturalar: list[Fatura]) -> dict:
     """
     Ayni VKN'nin farkli firma adlariyla, ya da ayni firma adinin
     farkli VKN'lerle eşleştiği durumlari tespit eder.
+
+    KIMLIK_MUAF_ANOMALILER etiketli faturalar haritalara HİÇ girmez (bkz. sabitin
+    üstündeki not) -- muafiyet O(1): faturanin kendi anomali_turleri'ne bakilir,
+    registry taranmaz.
     """
     vkn_to_adlar: dict[str, set[str]] = {}
     ad_to_vknler: dict[str, set[str]] = {}
 
     for fatura in faturalar:
+        turler = getattr(fatura, "anomali_turleri", None) or ()
+        if any(t in turler for t in KIMLIK_MUAF_ANOMALILER):
+            continue
         vkn_to_adlar.setdefault(fatura.satici_vkn, set()).add(fatura.satici_unvan)
         ad_to_vknler.setdefault(fatura.satici_unvan, set()).add(fatura.satici_vkn)
 
@@ -303,7 +333,8 @@ def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
     KASITLI OLARAK BURADA YOK: basamak_karisikligi, sistematik_yuvarlama --
     bunlar tanımı gereği matematiksel/kural bazlı doğrulamadan kaçan, sadece
     üretici tarafında etiketlenmesi gereken "sinsi" anomalilerdir. Ayrıca
-    fatura_no_tekrari ve VKN-firma tutarlılığı da YOK -- bunlar tek bir faturaya
+    ayni-fatura-no türleri (mukerrer_fis_yukleme / fatura_no_cakismasi) ve VKN-firma
+    tutarlılığı da YOK -- bunlar tek bir faturaya
     değil, faturalar ARASI ilişkiye bakar, bu fonksiyonun kapsamı dışında.
     """
     turler: set[str] = set()

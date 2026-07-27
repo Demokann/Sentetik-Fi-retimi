@@ -36,6 +36,42 @@ POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
     HarcamaKategorisi.KUMAR,
 }
 
+# ---------------------------------------------------------------------------
+# ANOMALİ GRUPLARI (A/B) -- Tornés/Thornton kalibrasyonu (bkz. simüle_edilmek_istenen.md).
+# Bu ayrim şimdiye kadar yalnizca dökümantasyonda düzyazi olarak yaşiyordu; onay
+# durumu etiketi (etiket_to_dict) bunu ÇALIŞTIRILABİLİR bir kurala çevirdiği için
+# buraya, politika sabitlerinin yanina taşindi.
+#
+#   A) SOSYAL/DAVRANIŞSAL -- çalişan bilinçlidir, manipülasyon ihtimali yüksektir.
+#      Sonucu: masraf REDDEDİLİR (onaylanmadi).
+#   B) YAPISAL/TEKNİK -- çalişanin görüş alani DIŞINDA (OCR/sistem/hesap hatasi).
+#      Sonucu: red değil, muhasebenin DÜZELTMESİ gerekir (gozden_gecirilecek).
+#
+# Not: gelecek_tarihli A grubundadir (çalişan ileri tarihli fiş yükleyemez, sistem
+# ya da niyet sorunudur) ama manipulatif ÜSLUP dal seçiminde kullanilmaz --
+# orada örtülecek bir kurnazlik yoktur (bkz. aciklama_uretim_core.prompt_olustur).
+A_GRUBU_ANOMALILER: set[str] = {
+    "yasakli_kategori",
+    "is_kolu_kategori_uyumsuzlugu",
+    "limit_asimi",
+    # Ayni fişi ikinci kez yüklemek BİLİNÇLİ bir kurnazliktir -> A.
+    # Kardeşi `fatura_no_cakismasi` (satici iki farkli fişi ayni no ile kesmiş)
+    # BİLEREK burada YOK: o çalişanin görüş alani dişinda, teknik bir satici
+    # hatasidir -> B grubuna (tümleyene) düşer.
+    "mukerrer_fis_yukleme",
+    "gelecek_tarihli",
+}
+
+# B grubu ENUMERE EDİLMEZ, A'nin tümleyeni olarak tanimlanir: yeni bir teknik
+# anomali türü eklendiğinde (ör. yeni bir hesap kontrolü) otomatik B sayilir ve
+# yanlişlikla "davranişsal" muamelesi görmez -- güvenli varsayilan budur.
+def anomali_grubu(anomali_turleri) -> str:
+    """Faturanin anomali grubunu döner: 'temiz' | 'A' | 'B'."""
+    if not anomali_turleri:
+        return "temiz"
+    return "A" if any(t in A_GRUBU_ANOMALILER for t in anomali_turleri) else "B"
+
+
 # Kategori bazli üst tutar limitleri (aşilirsa şüpheli sayilir)
 #!ÖNEMLİ
 #FIYAT_ARALIGI_'daki %30 dışarı-taşma üst sınırının üzerinde tutulmalı, aksi halde doğal gürültü limit_asimi'yı organik olarak tetikleyebilir."* 
@@ -141,6 +177,15 @@ class FaturaKalemi(BaseModel):
 
 
 class Fatura(BaseModel):
+    # Satir bazli BENZERSIZ anahtar. fatura_no benzersiz DEĞİLDİR (mukerrer_fis_yukleme
+    # ve fatura_no_cakismasi anomalileri kasitli olarak ayni no'yu iki kayda verir), bu
+    # yüzden açiklama boru hatti (batch_hazirla -> toplu_uret -> birlestir) fatura_no
+    # yerine BUNUNLA anahtarlanir. Aksi halde çiftin yalnizca biri açiklama üretir ve o
+    # tek metin iki kayda birden yazilirdi -- S2'de kalemler farkli olduğu için yanliş,
+    # S1'de ise gerçekçi değil (ayni fişi ikinci kez yükleyen çalişan sifirdan not yazar).
+    # Her satirda FARKLI olduğu için modele bir sinyal taşimaz; yine de eğitimde
+    # özellik olarak KULLANILMAMALI (salt join anahtari).
+    kayit_id: str = ""
     fatura_no: str
     fatura_tarihi: str
     satici_vkn: str  # 10 haneli
@@ -152,6 +197,9 @@ class Fatura(BaseModel):
     is_anomali: bool = False
     anomali_turleri: List[str] = Field(default_factory=list)
     aciklama_kategorisi: str = ""   # yeni — ground truth (yeterli/yetersiz/manipulatif/ai_uretimi), JSON export'a (fatura_to_dict) DAHİL EDİLMEZ
+    onay_durumu: str = ""           # yeni — ground truth (onaylandi/gozden_gecirilecek/onaylanmadi);
+                                    # (anomali_grubu × aciklama_kategorisi)'nden TÜRETİLİR, aciklama_kategorisi
+                                    # atandiktan SONRA doldurulur. fatura_to_dict'e DAHİL EDİLMEZ (leakage).
     aciklama_metni: str = ""        # yeni — LLM tarafından doldurulacak, fatura_to_dict'e (model girdisi) dahil edilecek 
 
     @property

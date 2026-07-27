@@ -39,10 +39,13 @@ BILINEN_ANOMALI_TURLERI = [
     "is_kolu_kategori_uyumsuzlugu", "yasakli_kategori", "limit_asimi",
     "ara_toplam", "kdv_tutari", "satir_toplami", "sistematik_yuvarlama",
     "ondalik_kaymasi", "dusuk_ondalik_kaymasi", "basamak_karisikligi",
-    "genel_toplam", "footer_kismi", "fatura_no_tekrari",
-    # kural_ihlali_turlerini_tespit_et() ile union'a eklenen, ama
-    # ANOMALI_FONKSIYONLARI'nda fonksiyonu olmayan (saf validator kaynakli) türler:
-    "fahis_fiyat", "dusuk_fiyat",
+    "genel_toplam", "footer_kismi",
+    "mukerrer_fis_yukleme", "fatura_no_cakismasi",
+    # NOT: "fahis_fiyat" / "dusuk_fiyat" BURADAN KALDIRILDI -- bu adlar
+    # "ondalik_kaymasi" / "dusuk_ondalik_kaymasi" olarak YENİDEN ADLANDIRILDI
+    # (eski ad enflasyon çağrışımı yapıyordu, oysa bu bir VERİ GİRİŞ HATASI;
+    # bkz. generators/anomaly_injector.py ADLANDIRMA NOTU). Listede kaldıkları
+    # sürece her koşuda "hiç üretilmemiş tür" uyarısı veriyorlardı.
 ]
 
 
@@ -133,8 +136,8 @@ def rapor_uret(etiketler: list[dict], rapor: dict) -> None:
     for anahtar, etiket in [
         ("yasakli_kategori_sayisi", "Yasakli kategori"),
         ("limit_asimi_sayisi", "Limit aşimi"),
-        ("fahis_fiyat_sayisi", "Fahiş fiyat"),
-        ("dusuk_fiyat_sayisi", "Düşük fiyat"),
+        ("ondalik_kaymasi_sayisi", "Ondalık kayması (yukarı)"),
+        ("dusuk_ondalik_kaymasi_sayisi", "Ondalık kayması (aşağı)"),
         ("is_kolu_uyumsuzlugu_sayisi", "İş kolu-kategori uyumsuzluğu"),
     ]:
         if anahtar in rapor:
