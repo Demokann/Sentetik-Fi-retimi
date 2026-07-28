@@ -1,0 +1,245 @@
+"""
+FAZ B'nin SON adimi: `onay_durumu` (admin/muhasebe kararinin sonucu) ground-truth
+etiketini üretir.
+
+Neden AYRI bir modül ve neden EN SONDA:
+  - onay_durumu ancak açiklama METNİ üretildikten SONRA anlamlidir. Faz A'da
+    (main.py) atanirsa "önce karar, sonra açiklama" gibi ters bir nedensellik
+    kurulur; oysa gerçekte muhasebe önce açiklamayi okur, sonra karar verir.
+  - Ollama bu etiketi HİÇBİR ZAMAN görmez. Üretim tarafi (batch_hazirla ->
+    aciklama_toplu_uret) yalnizca `aciklama_kategorisi`'ni tasir; `onay_durumu`
+    o dosyalarin hiçbirine girmez, burada üretilip AYRI etiket dosyasina yazilir.
+    Model girdisi (`aciklama_birlestir.py` -> faturalar_aciklamali.json) da bu
+    alani içermez -- ikisini karistirma.
+
+KARAR KURALI (2026-07-28 kararı) -- sürücü: (is_anomali, aciklama_kategorisi)
+
+                  ANOMALİSİZ            ANOMALİLİ (A/B ayrimi YOK)
+    yeterli       onaylandi             onaylanmadi
+    yetersiz      gozden_gecirilecek    onaylanmadi
+    manipulatif   gozden_gecirilecek    onaylanmadi
+    ai_uretimi    gozden_gecirilecek    onaylanmadi
+
+Yani: anomali varsa DOĞRUDAN RED (teknik/davranissal ayrimi yapilmaz).
+Anomali yoksa yalniz `yeterli` onaylanir; diger üç açiklama kategorisi
+incelemeye düser.
+
+Önceki kural (A/B grubu × kategori, 12 hücreli tablo) BIRAKILDI: B-grubu teknik
+hatalar "muhasebe düzeltir, onaylar" varsayimiyla gozden_gecirilecek'e düsüyordu.
+Yeni kuralda anomalinin kaynagi (calisan mi, sistem mi) onay kararini degistirmez;
+o ayrim zaten `anomali_turleri` etiketinde duruyor (schema.anomali_grubu ile
+istenildigi an türetilebilir).
+
+NOT: bu kuralla anomalili tarafta onay_durumu fiilen is_anomali'nin bir kopyasidir;
+bilgi yalnizca ANOMALİSİZ tarafta (kategori ekseninde) ek sinyal tasir.
+
+NEREYE YAZILIR: Faz B sonunda elde iki dosya kalir, `kayit_id` ile eslesirler:
+
+    data/faturalar_aciklamali.json            <- aciklama_birlestir.py  (MODEL GİRDİSİ:
+                                                 fatura alanlari + aciklama_metni)
+    data/faturalar_aciklamali_etiketler.json  <- BU MODÜL (GROUND TRUTH: is_anomali,
+                                                 anomali_turleri, aciklama_kategorisi,
+                                                 onay_durumu)
+
+Faz A'nin `data/faturalar_etiketler.json` dosyasi salt GİRDİdir, üzerine yazilmaz;
+üretilmis açiklamalar da (`data/aciklama/batch_*_ciktilar.json`) oldugu gibi kalir.
+
+Kullanim:
+    python onay_durumu_ata.py                       # varsayilan yollar
+    python onay_durumu_ata.py --tum-kayitlar        # açiklamasizlari da yaz (onay_durumu "")
+    python onay_durumu_ata.py --cikti-dizini data/aciklama \
+        --etiket-json data/faturalar_etiketler.json \
+        --output-json data/faturalar_aciklamali_etiketler.json
+"""
+
+import argparse
+import glob
+import json
+from collections import Counter
+from pathlib import Path
+
+VARSAYILAN_CIKTI_DIZINI = "data/aciklama"
+VARSAYILAN_ETIKET_JSON = "data/faturalar_etiketler.json"
+VARSAYILAN_OUTPUT_JSON = "data/faturalar_aciklamali_etiketler.json"
+
+ONAY_DURUMLARI = ["onaylandi", "gozden_gecirilecek", "onaylanmadi"]
+
+
+def onay_durumu_belirle(is_anomali: bool, aciklama_kategorisi: str) -> str:
+    """(is_anomali, aciklama_kategorisi) -> onay_durumu. Saf fonksiyon.
+
+    Tablo için modül docstring'ine bak. Rastgelelik YOKTUR: gözlenebilir bir
+    değişkene bağlanmayan rastgelelik saf etiket gürültüsüdür, öğrenilemez ve
+    yalnizca ulasilabilir dogruluk tavanini düsürür."""
+    if is_anomali:
+        return "onaylanmadi"
+    return "onaylandi" if aciklama_kategorisi == "yeterli" else "gozden_gecirilecek"
+
+
+def uretilen_kayitlari_yukle(dizin: Path) -> dict[str, dict]:
+    """batch_*_ciktilar.json -> {kayit_id: cikti_kaydi}.
+
+    Anahtar fatura_no DEĞİL kayit_id: mukerrer_fis_yukleme / fatura_no_cakismasi
+    anomalilerinde ayni fatura_no iki kayitta bulunur (bkz. CLAUDE.md §14)."""
+    kayitlar: dict[str, dict] = {}
+    for yol in sorted(glob.glob(str(dizin / "batch_*_ciktilar.json"))):
+        with open(yol, "r", encoding="utf-8") as f:
+            cikti = json.load(f)
+        for kayit_id, kayit in cikti.items():
+            kayitlar[kayit_id] = kayit
+    return kayitlar
+
+
+def etiketleri_uret(etiketler: list[dict], uretilen: dict[str, dict],
+                    tum_kayitlar: bool = False) -> tuple[list[dict], dict]:
+    """Açiklamasi ÜRETİLMİŞ kayitlar için onay_durumu'lu etiket listesi + rapor.
+
+    Açiklamasi olmayan kayitlar ATLANIR: onay_durumu, okunmus bir açiklamanin
+    sonucudur; metin yoksa etiket de üretilmez.
+
+    tum_kayitlar=True: etiket dosyasindaki TÜM kayitlar yazilir, açiklamasi
+    olmayanlarda onay_durumu BOŞ kalir. Model girdisi `aciklama_birlestir.py`
+    --sadece-uretilenler OLMADAN üretildiyse (yani 100k satirin tamami yazildiysa)
+    iki dosyanin satir kümesi ayni kalsin diye."""
+    sonuc: list[dict] = []
+    kategori_uyusmazligi = 0
+    is_anomali_uyusmazligi = 0
+    aciklamasiz = 0
+    dagilim = Counter()
+    capraz = Counter()
+
+    for etiket in etiketler:
+        kayit = uretilen.get(etiket["kayit_id"])
+        if kayit is None:
+            if not tum_kayitlar:
+                continue
+            # Açiklama yok -> karar da yok. Alan BOŞ birakilir (uydurma etiket
+            # üretmektense eksikligi görünür kalsin).
+            aciklamasiz += 1
+            sonuc.append({
+                "kayit_id": etiket["kayit_id"],
+                "fatura_no": etiket["fatura_no"],
+                "is_anomali": bool(etiket.get("is_anomali", bool(etiket.get("anomali_turleri")))),
+                "anomali_turleri": etiket.get("anomali_turleri", []),
+                "aciklama_kategorisi": etiket.get("aciklama_kategorisi", ""),
+                "onay_durumu": "",
+            })
+            continue
+
+        # Kategori kaynagi: ÜRETİMDE fiilen kullanilan kategori (batch çiktisi).
+        # batch_hazirla --kategori-override kullanildiysa bu, etiket dosyasindaki
+        # popülasyon kategorisinden farkli olabilir; metin hangi kategoriye göre
+        # yazildiysa onay karari da ona dayanmali (ve etiket dosyasi metinle
+        # tutarli kalmali).
+        kategori = kayit.get("aciklama_kategorisi") or etiket.get("aciklama_kategorisi", "")
+        if kategori != etiket.get("aciklama_kategorisi"):
+            kategori_uyusmazligi += 1
+
+        anomali_turleri = etiket.get("anomali_turleri", [])
+        is_anomali = bool(etiket.get("is_anomali", bool(anomali_turleri)))
+        if is_anomali != bool(anomali_turleri):
+            is_anomali_uyusmazligi += 1
+
+        durum = onay_durumu_belirle(is_anomali, kategori)
+        dagilim[durum] += 1
+        capraz[("anomalili" if is_anomali else "temiz", kategori, durum)] += 1
+
+        sonuc.append({
+            "kayit_id": etiket["kayit_id"],
+            "fatura_no": etiket["fatura_no"],
+            "is_anomali": is_anomali,
+            "anomali_turleri": anomali_turleri,
+            "aciklama_kategorisi": kategori,
+            "onay_durumu": durum,
+        })
+
+    kararli = sum(dagilim.values())
+    rapor = {
+        "uretilen_aciklama_sayisi": len(uretilen),
+        "yazilan_kayit_sayisi": len(sonuc),
+        "etiketlenen_kayit_sayisi": kararli,          # onay_durumu DOLU olanlar
+        "aciklamasiz_kayit_sayisi": aciklamasiz,      # yalniz --tum-kayitlar modunda >0
+        "eslesmeyen_aciklama_sayisi": len(uretilen) - kararli,
+        "kategori_uyusmazligi": kategori_uyusmazligi,
+        "is_anomali_uyusmazligi": is_anomali_uyusmazligi,
+        "onay_durumu_dagilimi": dict(dagilim),
+        "capraz_dagilim": {f"{a}|{k}|{d}": s for (a, k, d), s in sorted(capraz.items())},
+    }
+    return sonuc, rapor
+
+
+def raporu_yazdir(rapor: dict) -> None:
+    toplam = rapor["etiketlenen_kayit_sayisi"]
+    print(f"[+] {toplam} kayda onay_durumu atandi "
+          f"(dosyaya yazilan toplam kayit: {rapor['yazilan_kayit_sayisi']}).")
+    if rapor["aciklamasiz_kayit_sayisi"]:
+        print(f"[+] {rapor['aciklamasiz_kayit_sayisi']} kayitta açiklama yok "
+              f"-> onay_durumu BOŞ birakildi (--tum-kayitlar).")
+    if rapor["eslesmeyen_aciklama_sayisi"]:
+        print(f"[!] UYARI: {rapor['eslesmeyen_aciklama_sayisi']} üretilmis açiklamanin "
+              f"kayit_id'si etiket dosyasinda ESLESMEDİ.")
+    if rapor["kategori_uyusmazligi"]:
+        print(f"[!] {rapor['kategori_uyusmazligi']} kayitta batch kategorisi ile etiket "
+              f"kategorisi farkli (--kategori-override kullanilmis olabilir); "
+              f"BATCH kategorisi esas alindi.")
+    if rapor["is_anomali_uyusmazligi"]:
+        print(f"[!] UYARI: {rapor['is_anomali_uyusmazligi']} kayitta is_anomali ile "
+              f"anomali_turleri çelisiyor; is_anomali esas alindi.")
+
+    print("\n[+] onay_durumu dagilimi:")
+    for durum in ONAY_DURUMLARI:
+        adet = rapor["onay_durumu_dagilimi"].get(durum, 0)
+        oran = adet / toplam if toplam else 0.0
+        print(f"    {durum:20s} {adet:6d}  (%{oran*100:.1f})")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Üretilen açiklamalara göre onay_durumu ground-truth etiketini ata (Faz B son adim)")
+    parser.add_argument("--cikti-dizini", default=VARSAYILAN_CIKTI_DIZINI,
+                        help="batch_*_ciktilar.json dizini (üretilmis açiklamalar)")
+    parser.add_argument("--etiket-json", default=VARSAYILAN_ETIKET_JSON,
+                        help="Faz A etiket dosyasi (is_anomali/anomali_turleri/aciklama_kategorisi)")
+    parser.add_argument("--output-json", default=VARSAYILAN_OUTPUT_JSON,
+                        help="onay_durumu eklenmis etiket dosyasi (YENİ dosya)")
+    parser.add_argument("--tum-kayitlar", action="store_true",
+                        help="Açiklamasi olmayan kayitlari da yaz (onay_durumu BOŞ). "
+                             "aciklama_birlestir.py --sadece-uretilenler OLMADAN "
+                             "koşulduysa iki dosyanin satir kümesi ayni kalsin diye.")
+    parser.add_argument("--rapor-json", default=None,
+                        help="opsiyonel: dagilim raporunu bu yola yaz")
+    args = parser.parse_args()
+
+    uretilen = uretilen_kayitlari_yukle(Path(args.cikti_dizini))
+    print(f"[+] {len(uretilen)} adet üretilmis açiklama bulundu ({args.cikti_dizini}).")
+    if not uretilen:
+        print("HATA: hiç üretilmis açiklama yok. Önce aciklama_toplu_uret.py çalistir.")
+        return
+
+    with open(args.etiket_json, "r", encoding="utf-8") as f:
+        etiketler = json.load(f)
+    print(f"[+] {len(etiketler)} etiket okundu ({args.etiket_json}).")
+
+    if etiketler and "onay_durumu" in etiketler[0]:
+        print("[!] Girdi etiket dosyasinda eski bir onay_durumu alani var (eski kuraldan "
+              "kalma); YOK SAYILIP yeniden hesaplaniyor.")
+
+    sonuc, rapor = etiketleri_uret(etiketler, uretilen, tum_kayitlar=args.tum_kayitlar)
+    if not rapor["etiketlenen_kayit_sayisi"]:
+        print("HATA: hiçbir üretilmis açiklama etiket dosyasiyla eslesmedi (kayit_id uyumsuz?).")
+        return
+
+    with open(args.output_json, "w", encoding="utf-8") as f:
+        json.dump(sonuc, f, ensure_ascii=False, indent=2)
+
+    raporu_yazdir(rapor)
+    print(f"\n[+] Etiketler -> {args.output_json}")
+
+    if args.rapor_json:
+        with open(args.rapor_json, "w", encoding="utf-8") as f:
+            json.dump(rapor, f, ensure_ascii=False, indent=2)
+        print(f"[+] Rapor    -> {args.rapor_json}")
+
+
+if __name__ == "__main__":
+    main()

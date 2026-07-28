@@ -1,5 +1,5 @@
 import random
-from schema import Fatura, anomali_grubu
+from schema import Fatura
 
 # 4 sabit açıklama kalite kategorisi. Bu modül asıl açıklama METNİNİ üretmiyor
 # (o adım ayrı, LLM/qwen3 ile yapılacak) -- sadece o metnin hangi "davranış
@@ -116,54 +116,10 @@ def veri_setine_aciklama_kategorisi_ata(faturalar: list[Fatura]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ONAY DURUMU (admin/muhasebe tarafındaki sonuç) -- GROUND TRUTH
+# ONAY DURUMU -- BU MODÜLDE DEĞİL
 # ---------------------------------------------------------------------------
-# `(anomali_grubu × aciklama_kategorisi)`'nden TÜRETİLİR; rastgelelik YOKTUR.
-#
-# Neden rastgele "karışım" değil: hiçbir gözlenebilir değişkene bağlı olmayan
-# rastgelelik saf ETİKET GÜRÜLTÜSÜdür -- yazı-turası öğrenilemez, yalnız ulaşılabilir
-# doğruluk tavanını düşürür. Gri bölge isteniyorsa karışım bir özelliğe bağlı olmalı;
-# burada o özellik anomalinin A/B grubudur (schema.A_GRUBU_ANOMALILER).
-#
-# Karar tablosu:
-#                 temiz              B-grubu (teknik)      A-grubu (davranışsal)
-#   yeterli       onaylandi          gozden_gecirilecek    onaylanmadi
-#   yetersiz      gozden_gecirilecek gozden_gecirilecek    onaylanmadi
-#   ai_uretimi    gozden_gecirilecek gozden_gecirilecek    onaylanmadi
-#   manipulatif   gozden_gecirilecek onaylanmadi           onaylanmadi
-#
-# Gerekçeler:
-#  - B-grubu + yeterli -> RED DEĞİL: hata OCR/sistem kaynaklı, çalışan düzgün açıklama
-#    yazmış; gerçek hayatta muhasebe düzeltip onaylar. (ondalik_kaymasi istisnası da
-#    doğal olarak buraya düşer, bkz. CLAUDE.md §4.)
-#  - manipulatif + temiz -> RED DEĞİL: sayılar temiz, yalnız dil şüpheli -> incelenir.
-#    (Aşırı savunmacı ama dürüst çalışanı cezalandırmamak için.)
-#  - A-grubu her kategoride RED: aykırılık çalışanın görüş alanında ve bilinçli.
-#
-# Böylece onay_durumu `is_anomali`'nin kopyası OLMAZ; "çalışan sorunu mu, veri sorunu
-# mu" eksenini kodlar.
-ONAY_DURUMLARI = ["onaylandi", "gozden_gecirilecek", "onaylanmadi"]
-
-
-def onay_durumu_belirle(anomali_turleri, aciklama_kategorisi: str) -> str:
-    """(anomali_turleri, aciklama_kategorisi) -> onay_durumu. Saf fonksiyon."""
-    grup = anomali_grubu(anomali_turleri)
-
-    if aciklama_kategorisi == "manipulatif":
-        # Temizde sayılar tutuyor -> red değil inceleme; anomaliyle birleşince red.
-        return "gozden_gecirilecek" if grup == "temiz" else "onaylanmadi"
-    if grup == "A":
-        return "onaylanmadi"
-    if grup == "B":
-        return "gozden_gecirilecek"
-    # temiz fatura: yalnız 'yeterli' onaylanır.
-    return "onaylandi" if aciklama_kategorisi == "yeterli" else "gozden_gecirilecek"
-
-
-def veri_setine_onay_durumu_ata(faturalar: list[Fatura]) -> None:
-    """Her faturaya (yerinde) onay_durumu atar.
-
-    DİKKAT: veri_setine_aciklama_kategorisi_ata'dan SONRA çağrılmalı -- kategori
-    girdilerden biridir. Union etiketleme de bitmiş olmalı (anomali_turleri kesin)."""
-    for fatura in faturalar:
-        fatura.onay_durumu = onay_durumu_belirle(fatura.anomali_turleri, fatura.aciklama_kategorisi)
+# `onay_durumu` (onaylandi/gozden_gecirilecek/onaylanmadi) etiketi buradan
+# ÇIKARILDI ve `onay_durumu_ata.py`'ye taşındı. Sebep: muhasebe kararı ancak
+# açıklama METNİ üretilip okunduktan SONRA verilebilir; burada (Faz A'da,
+# kategori atamasıyla birlikte) üretmek "önce karar, sonra açıklama" gibi ters
+# bir nedensellik kuruyordu. Karar tablosu ve gerekçesi için o modüle bak.

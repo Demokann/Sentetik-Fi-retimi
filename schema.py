@@ -38,14 +38,15 @@ POLICY_YASAKLI_KATEGORILER: set[HarcamaKategorisi] = {
 
 # ---------------------------------------------------------------------------
 # ANOMALİ GRUPLARI (A/B) -- Tornés/Thornton kalibrasyonu (bkz. simüle_edilmek_istenen.md).
-# Bu ayrim şimdiye kadar yalnizca dökümantasyonda düzyazi olarak yaşiyordu; onay
-# durumu etiketi (etiket_to_dict) bunu ÇALIŞTIRILABİLİR bir kurala çevirdiği için
-# buraya, politika sabitlerinin yanina taşindi.
+# Bu ayrim dökümantasyondaki düzyaziyi ÇALIŞTIRILABİLİR bir kurala çevirir.
 #
 #   A) SOSYAL/DAVRANIŞSAL -- çalişan bilinçlidir, manipülasyon ihtimali yüksektir.
-#      Sonucu: masraf REDDEDİLİR (onaylanmadi).
 #   B) YAPISAL/TEKNİK -- çalişanin görüş alani DIŞINDA (OCR/sistem/hesap hatasi).
-#      Sonucu: red değil, muhasebenin DÜZELTMESİ gerekir (gozden_gecirilecek).
+#
+# DİKKAT: `onay_durumu` artik bu ayrima BAKMAZ (anomali varsa dogrudan red,
+# bkz. onay_durumu_ata.py). Ayrim yine de burada duruyor: `anomali_turleri`
+# etiketinden her an türetilebilen bir ANALİZ/kirilim ekseni (rapor, alt küme
+# seçimi) ve `ACIKLAMA_KATEGORI_ORANLARI` kalibrasyonunun düşünsel temeli.
 #
 # Not: gelecek_tarihli A grubundadir (çalişan ileri tarihli fiş yükleyemez, sistem
 # ya da niyet sorunudur) ama manipulatif ÜSLUP dal seçiminde kullanilmaz --
@@ -197,9 +198,8 @@ class Fatura(BaseModel):
     is_anomali: bool = False
     anomali_turleri: List[str] = Field(default_factory=list)
     aciklama_kategorisi: str = ""   # yeni — ground truth (yeterli/yetersiz/manipulatif/ai_uretimi), JSON export'a (fatura_to_dict) DAHİL EDİLMEZ
-    onay_durumu: str = ""           # yeni — ground truth (onaylandi/gozden_gecirilecek/onaylanmadi);
-                                    # (anomali_grubu × aciklama_kategorisi)'nden TÜRETİLİR, aciklama_kategorisi
-                                    # atandiktan SONRA doldurulur. fatura_to_dict'e DAHİL EDİLMEZ (leakage).
+    # onay_durumu BURADA YOK: o etiket Faz A'da (fatura nesnesi üzerinde) değil,
+    # açiklama metni üretildikten SONRA JSON üzerinde atanir -> onay_durumu_ata.py.
     aciklama_metni: str = ""        # yeni — LLM tarafından doldurulacak, fatura_to_dict'e (model girdisi) dahil edilecek 
 
     @property

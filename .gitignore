@@ -13,7 +13,12 @@ firma_adlari_osm_cek.py
 simüle_edilmek_istenen.md
 .claude/*
 CLAUDE.md
-
+deneme.jsonl
+deneme.md
+deneme2.md
+deneme2.jsonl
+pilot_set_hazirla.py
+docs/*
 whaatif.py
 deneme_80.md
 #aciklama dosyalarını ignore et

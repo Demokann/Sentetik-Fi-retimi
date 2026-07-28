@@ -8,10 +8,7 @@ from validators import (
 )
 from generators.field_generator import rastgele_fatura
 from generators.anomaly_injector import karisik_veri_seti_uret
-from generators.aciklama_uretici import (
-    veri_setine_aciklama_kategorisi_ata,
-    veri_setine_onay_durumu_ata,
-)
+from generators.aciklama_uretici import veri_setine_aciklama_kategorisi_ata
 
 
 def fatura_to_dict(fatura) -> dict:
@@ -63,9 +60,9 @@ def etiket_to_dict(fatura) -> dict:
         "is_anomali": fatura.is_anomali,
         "anomali_turleri": fatura.anomali_turleri,
         "aciklama_kategorisi": fatura.aciklama_kategorisi,
-        # onaylandi / gozden_gecirilecek / onaylanmadi -- (anomali_grubu ×
-        # aciklama_kategorisi)'nden türetilmiş iş-seviyesi ground truth.
-        "onay_durumu": fatura.onay_durumu,
+        # onay_durumu BİLEREK BURADA YOK: o etiket açıklama METNİ üretildikten
+        # SONRA, Faz B'nin son adımında atanır (onay_durumu_ata.py) ve ayrı bir
+        # etiket dosyasına (faturalar_aciklamali_etiketler.json) yazılır.
     }
 
 
@@ -149,10 +146,9 @@ def main():
     # ONCELIK_SIRASI eksik bilgiyle çalışır.
     veri_setine_aciklama_kategorisi_ata(fatura_nesneleri)
 
-    # onay_durumu, aciklama_kategorisi'nden TÜRETİLİR -> mutlaka ondan SONRA.
-    # (anomali_grubu × aciklama_kategorisi) karar tablosu için bkz.
-    # generators/aciklama_uretici.onay_durumu_belirle.
-    veri_setine_onay_durumu_ata(fatura_nesneleri)
+    # onay_durumu ataması BURADA YAPILMAZ (eskiden yapılıyordu). Muhasebe kararı
+    # ancak açıklama METNİ okunduktan sonra verilebilir -> Faz B'nin son adımında,
+    # onay_durumu_ata.py ile atanır. Ollama bu etiketi hiçbir aşamada görmez.
 
     # VKN-firma tutarlilik GÜVENLİK KONTROLÜ (artık veri SİLMEZ).
     # Firma registry mimarisiyle (firma_registry_olustur.py) her ad→sabit VKN ve
