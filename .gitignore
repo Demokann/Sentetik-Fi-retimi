@@ -25,6 +25,8 @@ deneme_80.md
 aciklama_mdler/*
 # data içindeki her şeyi ignore et
 data/*
+qwen3*
+trendyol*
 
 
 # belirli klasörleri dahil et
