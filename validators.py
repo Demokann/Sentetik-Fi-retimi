@@ -1,11 +1,11 @@
 from decimal import Decimal
 from datetime import date
 from schema import (
-    Fatura, FaturaKalemi, HarcamaKategorisi, KDV_ORANI_MAP, paraya_yuvarla,
+    Fatura, FaturaKalemi, HarcamaKategorisi, IsKolu, KDV_ORANI_MAP, paraya_yuvarla,
     IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
 )
 from generators.anomaly_injector import ANOMALI_FONKSIYONLARI
-from generators.field_generator import FIYAT_ARALIGI_GENEL
+from generators.field_generator import FIYAT_ARALIGI_GENEL, ANOMALI_URUN_MAKULLUGU
 
 
 
@@ -108,9 +108,42 @@ def tarih_gelecekte_mi(fatura_tarihi_str: str, bugun_str: str) -> bool:
 #5.a Mevzuat değişikliği oabilmesi nedeni ile kategori_kdv_doğrula kaldırıldı. Kategoriye göre KDV oranı kontrolü artık yapılmayacak.
 
 #5b. İş Kolu - Kategori Uyum Kontrolü
-def kalem_is_kolu_uyumu_dogrula(kalem: FaturaKalemi, izinli_kategoriler: list[HarcamaKategorisi]) -> bool:
-    """Kalemin kategorisi, faturanın iş koluna izinli kategoriler arasında mı?"""
-    return kalem.harcama_kategorisi in izinli_kategoriler
+def yasakli_kalem_saticiya_makul_mu(kalem: FaturaKalemi, is_kolu: IsKolu | None) -> bool:
+    """
+    Yasakli kategorideki bir kalemi, bu SATICININ fiilen satip satmadigini
+    soyler (politika ihlali olup olmadigini DEGIL -- o ayri eksen, bkz.
+    kalem_yasakli_kategoride_mi).
+
+    Kaynak: data/anomali_veri/anomali_urunler.csv `makul_is_kollari` sutunu
+    (bkz. field_generator.anomali_urun_makullugu_yukle docstring'i -- gerekce
+    ve olcum orada). Restoranda alkol / markette sigara / akaryakit
+    istasyonunda piyango bileti satici acisindan OLAGANDIR, yalnizca sirket
+    politikasina aykiridir.
+
+    Yasakli olmayan kalemler icin False doner (bu fonksiyonun konusu degil).
+    """
+    if is_kolu is None or kalem.harcama_kategorisi not in POLICY_YASAKLI_KATEGORILER:
+        return False
+    return is_kolu.value in ANOMALI_URUN_MAKULLUGU.get(kalem.aciklama.strip(), set())
+
+
+def kalem_is_kolu_uyumu_dogrula(
+    kalem: FaturaKalemi,
+    izinli_kategoriler: list[HarcamaKategorisi],
+    is_kolu: IsKolu | None = None,
+) -> bool:
+    """
+    Kalemin kategorisi, faturanın iş koluna izinli kategoriler arasında mı?
+
+    `is_kolu` verilirse ek olarak SATICI MAKULLUGU eksenine bakilir: yasakli
+    kategorideki bir kalem, o is kolunun fiilen sattigi bir urunse (restoranda
+    alkol, markette sigara) uyumsuzluk SAYILMAZ -- politika ihlali
+    `yasakli_kategori` etiketiyle zaten ayrica isaretleniyor. Parametre
+    verilmezse eski davranis (her yasakli kalem uyumsuzluk) korunur.
+    """
+    if kalem.harcama_kategorisi in izinli_kategoriler:
+        return True
+    return yasakli_kalem_saticiya_makul_mu(kalem, is_kolu)
 
 
 #5c. Politika İhlali — Yasakli Kategori Kontrolü
@@ -277,7 +310,7 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
             hatalar.append(f"Kalem {kalem.kalem_no}: kdv_tutari hesabi hatali")
         if not kalem_satir_toplam_dogrula(kalem):
             hatalar.append(f"Kalem {kalem.kalem_no}: satir_toplam hesabi hatali")
-        if not kalem_is_kolu_uyumu_dogrula(kalem, izinli_kategoriler):
+        if not kalem_is_kolu_uyumu_dogrula(kalem, izinli_kategoriler, fatura.is_kolu):
             hatalar.append(
                 f"IS_KOLU_UYUMSUZLUGU: Kalem {kalem.kalem_no} iş koluna ({fatura.is_kolu.value}) "
                 f"uygun değil: {kalem.harcama_kategorisi.value}"
@@ -347,7 +380,7 @@ def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
             turler.add("kdv_tutari")
         if not kalem_satir_toplam_dogrula(kalem):
             turler.add("satir_toplami")
-        if not kalem_is_kolu_uyumu_dogrula(kalem, izinli_kategoriler):
+        if not kalem_is_kolu_uyumu_dogrula(kalem, izinli_kategoriler, fatura.is_kolu):
             turler.add("is_kolu_kategori_uyumsuzlugu")
         if kalem_yasakli_kategoride_mi(kalem):
             turler.add("yasakli_kategori")

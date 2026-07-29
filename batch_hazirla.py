@@ -89,7 +89,7 @@ def dengeli_ornekle(
 # ---------------------------------------------------------------------------
 
 # is_kolu, fatura_to_dict() tarafından faturalar.json'a export edilmiyor
-# (main.py:fatura_to_dict) -- faturalar.json'a DOKUNMADAN (§5) çeşitlilik
+# (main.py:fatura_to_dict) -- faturalar.json'a DOKUNMADAN (CLAUDE.md §3) çeşitlilik
 # ölçmek için baskın kalem kategorisini iş kolu yerine proxy olarak kullanıyoruz.
 def _baskin_kategori(fatura: dict) -> str:
     if not fatura["kalemler"]:
@@ -278,7 +278,7 @@ def anomali_turu_kotali_sec(
     seed: int = 42,
 ) -> tuple[list[dict], dict]:
     """
-    75k'lik geçerli fatura havuzundan, her anomali türünün (anomali_turleri
+    faturalar.jsonda geçerli fatura havuzundan, her anomali türünün (anomali_turleri
     içindeki ham türler) alt kümede tabana (tur_taban) kadar temsil edilmesini,
     bol türlerin ise tavani (tur_tavan) aşmamasini garanti eden kota bazlı bir
     seçim yapar. Union/çoklu-etiket faturalar (bir fatura birden fazla türe

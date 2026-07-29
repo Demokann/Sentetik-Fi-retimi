@@ -245,6 +245,47 @@ def anomali_urunleri_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dict[Harc
             havuzlar.setdefault(kategori, []).append(urun)
     return havuzlar
 
+
+def anomali_urun_makullugu_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dict[str, set[str]]:
+    """
+    Ayni CSV'nin ucuncu sutunu (`makul_is_kollari`, `;` ile ayrilmis is_kolu
+    listesi) -> {urun_adi: {is_kolu, ...}}.
+
+    NEDEN AYRI BIR EKSEN: yasakli kategoriler (alkol/tutun/eglence/kumar)
+    hicbir is kolunun IS_KOLU_KATEGORILERI listesinde YOK -- olamaz da, olsaydi
+    TEMIZ fise alkol/sigara duserdi. Bunun yan etkisi olarak yasakli bir kalem
+    enjekte edilir edilmez `is_kolu_kategori_uyumsuzlugu` de yapisal olarak
+    tetikleniyordu (olculdu: 2065/2065, %100). Oysa bunlar IKI AYRI eksendir:
+      - POLITIKA ekseni  : sirket bu gideri odemez            -> yasakli_kategori
+      - SATICI ekseni    : bu dukkan bunu zaten satmaz        -> is_kolu_kategori_uyumsuzlugu
+    Restoranda alkol, markette sigara, akaryakit istasyonunda piyango bileti
+    POLITIKA ihlalidir ama satici acisindan tamamen olagandir. Iki etiket %100
+    korele oldugunda biri bilgi tasimaz; model aralarindaki farki ogrenemez.
+
+    Makullik URUN bazindadir, kategori bazinda DEGIL: markette "Milli Piyango
+    Bileti" makul, "Casino Cip Alimi" degil; restoranda "Nargile" makul, "Sarma
+    Tutun (50gr)" degil. Kategori bazli bir muafiyet bu ayrimi silerdi.
+
+    Sutun bos ise urun hicbir is koluna makul degildir (destinasyon biletleri,
+    casino urunleri) -- bunlar uyumsuzlugu tetiklemeye DEVAM eder. Dosya ya da
+    sutun yoksa bos dict doner: davranis eski haline (her yasakli kalem
+    uyumsuzluk tetikler) guvenli sekilde geri duser.
+    """
+    import csv as _csv
+    makullik: dict[str, set[str]] = {}
+    if not dosya_yolu.exists():
+        return makullik
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        reader = _csv.DictReader(f)
+        for satir in reader:
+            urun = (satir.get("urun_adi") or "").strip()
+            ham = (satir.get("makul_is_kollari") or "").strip()
+            if not urun or not ham:
+                continue
+            makullik[urun] = {p.strip() for p in ham.split(";") if p.strip()}
+    return makullik
+
+
 # 2.1 — Kategoriye göre açiklama havuzu
 
 ACIKLAMA_HAVUZU = {
@@ -429,6 +470,10 @@ for kategori, urunler in _ulasim_urunleri.items():
 _temiz_urunler = temiz_urunleri_yukle()
 
 _anomali_urunleri = anomali_urunleri_yukle()
+
+# Yasakli kalemin SATICI ekseninde makul olup olmadigi (bkz.
+# anomali_urun_makullugu_yukle docstring'i). validators.py bunu okur.
+ANOMALI_URUN_MAKULLUGU: dict[str, set[str]] = anomali_urun_makullugu_yukle()
 
 # ALKOL/EGLENCE/TUTUN_URUNLERI/KUMAR: elle yazilmis sabit listeler sadece
 # 3-4 elemanliydi, CSV çok daha zengin (100'lerce ürün) -- CSV varsa
