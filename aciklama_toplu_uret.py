@@ -11,6 +11,7 @@ Kesilirse (Ctrl-C / çökme / ertesi gün) aynı komut kaldığı yerden devam e
 
 import argparse
 import json
+import re
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -53,6 +54,31 @@ def cikti_kaydet(yol: Path, cikti: dict) -> None:
         json.dump(cikti, f, ensure_ascii=False, indent=2)
 
 
+def _batch_no(dosya_adi: str, varsayilan: int) -> int:
+    """'batch_0011.json' -> 11. Ad beklenen kalıpta değilse listedeki sırayı kullanır."""
+    m = re.search(r"(\d+)", dosya_adi)
+    return int(m.group(1)) if m else varsayilan
+
+
+def _batch_numaralarini_coz(ifade: str) -> set[int]:
+    """'11-20', '7', '1,3,5', '1-3,7' -> {numaralar}.
+
+    ÇOK MAKİNELİ üretim için: her makineye ayrık bir aralık verilir, çıktılar
+    batch başına ayrı dosyaya (batch_NNNN_ciktilar.json) yazıldığı için yazma
+    çakışması olmaz."""
+    numaralar: set[int] = set()
+    for parca in ifade.split(","):
+        parca = parca.strip()
+        if not parca:
+            continue
+        if "-" in parca:
+            bas, _, son = parca.partition("-")
+            numaralar.update(range(int(bas), int(son) + 1))
+        else:
+            numaralar.add(int(parca))
+    return numaralar
+
+
 def dilimle(liste: list, boyut: int):
     for i in range(0, len(liste), boyut):
         yield liste[i : i + boyut]
@@ -67,17 +93,52 @@ def main():
     parser.add_argument("--model", default=MODEL_VARSAYILAN)
     parser.add_argument("--host", default=OLLAMA_HOST_VARSAYILAN)
     parser.add_argument("--max-batch", type=int, default=0, help="Bu koşuda en fazla kaç batch işlensin (0 = sınırsız)")
+    parser.add_argument(
+        "--batch", default="",
+        help="İşlenecek batch NUMARALARI: '11-20', '7', '1,3,5' ya da karışık '1-3,7'. "
+             "ÇOK MAKİNELİ üretim için: her makineye AYRIK bir aralık ver. Bu mod "
+             "durum.json'a YAZMAZ (paylaşımlı dosya, makineler birbirini ezerdi); "
+             "resume yine çalışır çünkü asıl durum batch_NNNN_ciktilar.json'dadır.",
+    )
     parser.add_argument("--insan-md", action="store_true", help="İnsan incelemesi için ayrıca MD raporu yaz")
     args = parser.parse_args()
 
     dizin = Path(args.cikti_dizini)
     durum = durum_yukle(dizin)
-    kalan_batchler = [b for b in durum["batchler"] if not b["tamam"]]
 
-    if not kalan_batchler:
-        print("[✓] Tüm batch'ler zaten tamamlanmış. Yapılacak iş yok.")
+    # --batch verilirse durum.json SALT OKUNUR olur (bkz. yardım metni).
+    durum_yazilabilir = not args.batch
+    secili_numaralar = _batch_numaralarini_coz(args.batch) if args.batch else None
+
+    kalan_batchler = []
+    for sira, b in enumerate(durum["batchler"], start=1):
+        no = _batch_no(b["dosya"], sira)
+        if secili_numaralar is not None and no not in secili_numaralar:
+            continue
+        # Aralık modunda durum.json'daki 'tamam' bayrağı BAŞKA bir makinenin
+        # yazdığı olabilir; güvenilir değil. O yüzden aralık verildiğinde bayrak
+        # yok sayılır, gerçek durum ciktilar dosyasından okunur.
+        if secili_numaralar is None and b["tamam"]:
+            continue
+        kalan_batchler.append(b)
+
+    # Eksik girdi dosyasını EN BAŞTA yakala: yoksa runner ilk batch'te
+    # FileNotFoundError ile düşerdi -- hem de saatler sonra değil, hiç iş
+    # yapmadan; ama hangi dosyaların eksik olduğunu söylemeden.
+    eksikler = [b["dosya"] for b in kalan_batchler if not (dizin / b["dosya"]).exists()]
+    if eksikler:
+        print(f"[HATA] {len(eksikler)} batch girdi dosyası bulunamadı: {', '.join(eksikler[:5])}"
+              + (" ..." if len(eksikler) > 5 else ""))
+        print("       Dizin yanlış olabilir (--cikti-dizini) ya da batch_hazirla.py yeniden koşmalı.")
         return
 
+    if not kalan_batchler:
+        print("[✓] İşlenecek batch yok (hepsi tamam ya da --batch aralığı boş).")
+        return
+
+    if secili_numaralar is not None:
+        print(f"[+] --batch aralığı: {sorted(secili_numaralar)} -> {len(kalan_batchler)} batch")
+        print("[i] durum.json'a YAZILMAYACAK (çok makineli mod). Resume ciktilar dosyalarından.")
     print(f"[+] {len(kalan_batchler)} bekleyen batch var (toplam {durum['batch_sayisi']}).")
     print(f"[+] Tempo: {args.burst_size} fatura/burst, {args.cooldown_min} dk cooldown, {args.workers} worker.\n")
 
@@ -123,7 +184,8 @@ def main():
 
         if not kalanlar:
             batch["tamam"] = True
-            durum_kaydet(dizin, durum)
+            if durum_yazilabilir:
+                durum_kaydet(dizin, durum)
             print(f"    (bu batch zaten tamam, işaretlendi)\n")
             continue
 
@@ -192,7 +254,8 @@ def main():
         # Batch tamam
         batch["tamam"] = True
         batch["tamamlanma_zamani"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        durum_kaydet(dizin, durum)
+        if durum_yazilabilir:
+            durum_kaydet(dizin, durum)
         islenen_batch += 1
 
         if args.insan_md:
