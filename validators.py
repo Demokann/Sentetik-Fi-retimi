@@ -114,7 +114,7 @@ def yasakli_kalem_saticiya_makul_mu(kalem: FaturaKalemi, is_kolu: IsKolu | None)
     soyler (politika ihlali olup olmadigini DEGIL -- o ayri eksen, bkz.
     kalem_yasakli_kategoride_mi).
 
-    Kaynak: data/anomali_veri/anomali_urunler.csv `makul_is_kollari` sutunu
+    Kaynak: data/anomali_verileri/anomali_urunler.csv `makul_is_kollari` sutunu
     (bkz. field_generator.anomali_urun_makullugu_yukle docstring'i -- gerekce
     ve olcum orada). Restoranda alkol / markette sigara / akaryakit
     istasyonunda piyango bileti satici acisindan OLAGANDIR, yalnizca sirket

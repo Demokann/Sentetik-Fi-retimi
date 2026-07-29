@@ -275,6 +275,7 @@ def anomali_turu_kotali_sec(
     temiz_orani_max: float = 0.75,
     hedef_kategori_oranlari: dict[str, float] | None = None,
     kategori_override: bool = False,
+    kategori_hedefli: bool = True,
     seed: int = 42,
 ) -> tuple[list[dict], dict]:
     """
@@ -349,6 +350,53 @@ def anomali_turu_kotali_sec(
     tur_sayaci: dict[str, int] = {tur: 0 for tur in tur_havuzlari}
     secilen_anomalili: set[str] = set()
 
+    # --- KATEGORİ EKSENİ: yeniden atama DEĞİL, SEÇİM ---------------------
+    # `aciklama_kategorisi` etiketi ARAŞTIRMAYLA KALİBRE edilmiş ağırlıklarla
+    # (ACIKLAMA_KATEGORI_ORANLARI) Faz A'da atanır ve BURADA ASLA DEĞİŞTİRİLMEZ.
+    # Hedef kompozisyona (varsayılan %50/20/20/10) ulaşmanın doğru yolu etiketi
+    # yeniden atamak değil (bkz. _kategori_kotali_yeniden_ata -- artık gereksiz),
+    # o kategoriye SAHİP faturaları seçmektir.
+    #
+    # Neden gerekliydi: kota seçimi yalnız anomali TÜRÜNE bakıyordu, kategoriye
+    # kör olduğu için kompozisyon havuzun doğal dağılımına düşüyordu
+    # (ölçüldü, 20k: %56,0/29,6/6,9/7,5 -- manipulatif hedefin üçte biri).
+    #
+    # Fizibilite (ölçüldü): tür kotaları altında seçilebilen anomalili
+    # faturaların 2991'i manipulatif; havuzda ayrıca 1495 TEMİZ manipulatif var
+    # -> ulaşılabilir tavan 4486 >= 20k'nın %20'si olan 4000. Yani hedef salt
+    # seçimle karşılanabilir; manipulatif EN DAR eksendir, bu yüzden tür
+    # döngüsünde ona öncelik verilir.
+    kategori_hedefi: dict[str, int] = {
+        kat: round(hedef_toplam * oran) for kat, oran in hedef_kategori_oranlari.items()
+    } if kategori_hedefli else {}
+    kategori_sayaci: Counter = Counter()
+
+    # KITLIK SIRASI -- anomalili turda hangi kategoriye öncelik verileceği.
+    # Ölçüt "kotası açık mı" DEĞİL (turun başında hepsi açıktır, ayrım üretmez),
+    # TEMİZ havuzdaki bolluktur: anomalili slotlar kıt, temiz havuz ise dolgu
+    # kaynağıdır. Temizde bol olan bir kategoriyi (yeterli: 44.355) anomalili
+    # slotta harcamak israftır; temizde kıt olanı (manipulatif: 1.495) ise
+    # ancak anomalili taraftan toplayabiliriz. Bu yüzden temiz havuzu KÜÇÜK
+    # olan kategori önce gelir.
+    _temiz_bolluk: Counter = Counter(
+        etiket_map[fno]["aciklama_kategorisi"] for fno in temiz_no
+    )
+    kategori_kitlik_sirasi: dict[str, int] = {
+        kat: sira for sira, kat in enumerate(sorted(_temiz_bolluk, key=lambda k: _temiz_bolluk[k]))
+    }
+    _DOLMUS = 99  # kotası dolmuş kategori en sona
+
+    def _kategori_onceligi(fno: str) -> int:
+        """Küçük = önce seç. Kotayı KATI sınır yapmıyoruz: dolmuş kategoriden de
+        alınabilir, yalnız sıralamada en sona düşer -- aksi halde tür tabanları
+        karşılanamaz ve kota mekanizmasının asıl amacı bozulurdu."""
+        if not kategori_hedefli:
+            return 0
+        kat = etiket_map[fno]["aciklama_kategorisi"]
+        if kategori_sayaci[kat] >= kategori_hedefi.get(kat, 0):
+            return _DOLMUS
+        return kategori_kitlik_sirasi.get(kat, _DOLMUS - 1)
+
     for tur in tur_sirasi:
         ihtiyac = tavan_efektif[tur] - tur_sayaci[tur]
         if ihtiyac <= 0:
@@ -361,8 +409,13 @@ def anomali_turu_kotali_sec(
         # başka bir türün (ör. is_kolu_kategori_uyumsuzlugu) kotası gereksiz
         # tüketilmez (bkz. limit_asimi örneği). sort() stabil olduğu için
         # aynı münhasırlık skorundakiler arasında çeşitlilik sırası korunur.
-        sira.sort(key=lambda fno: sum(
-            1 for t2 in etiket_map[fno]["anomali_turleri"] if t2 != tur and t2 in tur_sayaci
+        # Sıralama ölçütü İKİ eksenli: önce kategori kotası açık olanlar
+        # (kompozisyon hedefi), sonra münhasırlık (tür bütçesini koru).
+        # Kategori ekseni ÖNCE gelir çünkü tür tavanı zaten katı bir üst sınır
+        # olarak ayrıca uygulanıyor; münhasırlık ise yalnız bir optimizasyon.
+        sira.sort(key=lambda fno: (
+            _kategori_onceligi(fno),
+            sum(1 for t2 in etiket_map[fno]["anomali_turleri"] if t2 != tur and t2 in tur_sayaci),
         ))
         alinan = 0
         for fno in sira:
@@ -375,6 +428,7 @@ def anomali_turu_kotali_sec(
             if any(tur_sayaci[t2] >= tavan_efektif[t2] for t2 in turleri if t2 != tur and t2 in tur_sayaci):
                 continue
             secilen_anomalili.add(fno)
+            kategori_sayaci[etiket_map[fno]["aciklama_kategorisi"]] += 1
             for t2 in turleri:
                 if t2 in tur_sayaci:
                     tur_sayaci[t2] += 1
@@ -388,11 +442,66 @@ def anomali_turu_kotali_sec(
     anomali_ust_sinir = int(hedef_toplam * (1 - temiz_orani_min))
     anomalili_kirpildi = len(secilen_anomalili) > anomali_ust_sinir
     if anomalili_kirpildi:
-        secilen_anomalili = set(_cesitli_sira(list(secilen_anomalili), fatura_map, rnd)[:max(anomali_ust_sinir, 0)])
+        # Kırparken de kategori hedefini gözet: kotası AÇIK olanları koru,
+        # fazlalığı doymuş kategorilerden at (rastgele kırpmak manipulatif gibi
+        # dar bir ekseni hedefin altına düşürürdü).
+        kirpma_sirasi = _cesitli_sira(list(secilen_anomalili), fatura_map, rnd)
+        if kategori_hedefli:
+            tutulan: Counter = Counter()
+
+            # Kırpma YALNIZ kategori eksenine bakar. Nadirlik ikinci anahtar
+            # olarak DENENDİ ve GERİ ALINDI (2026-07-29): 'nadir türe ait olanı
+            # tut' kuralı, havuzu büyük ama TEK-ETİKETLİ türleri (ör.
+            # dusuk_ondalik_kaymasi, havuz 2287) sıralamanın sonuna atıyor;
+            # kategori ekseni de onları (temiz dağılımlı oldukları için) geri
+            # ittiğinden tür 561'den 22'ye çöktü. İki anahtar aynı yöne
+            # bindiğinde bir türü tamamen eleyebiliyor -- kırpma tek eksende
+            # kalmalı, tür dengesini asıl kota döngüsü kuruyor zaten.
+            def _kirpma_anahtari(fno: str) -> int:
+                kat = etiket_map[fno]["aciklama_kategorisi"]
+                tutulan[kat] += 1
+                return 0 if tutulan[kat] <= kategori_hedefi.get(kat, 0) else 1
+
+            kirpma_sirasi.sort(key=_kirpma_anahtari)
+        secilen_anomalili = set(kirpma_sirasi[:max(anomali_ust_sinir, 0)])
+        kategori_sayaci = Counter(
+            etiket_map[fno]["aciklama_kategorisi"] for fno in secilen_anomalili
+        )
 
     anomalili_sayisi = len(secilen_anomalili)
     temiz_hedef = max(0, min(hedef_toplam - anomalili_sayisi, len(temiz_no)))
-    secilen_temiz = _cesitli_ornekle(temiz_no, fatura_map, temiz_hedef, rnd)
+
+    if kategori_hedefli:
+        # TEMİZ doldurma da kategori KATMANLI: anomalili taraftan sonra her
+        # kategoride kalan açık kadar temiz fatura çekilir, açık kapanmazsa
+        # (havuzda o kategoriden yeterli temiz yoksa) zorlanmaz -- eksik rapora
+        # yazılır. Katman içi seçim yine _cesitli_ornekle ile (iş kolu/tutar
+        # çeşitliliği korunur).
+        temiz_kat: dict[str, list[str]] = {}
+        for fno in temiz_no:
+            temiz_kat.setdefault(etiket_map[fno]["aciklama_kategorisi"], []).append(fno)
+        secilen_temiz = []
+        # Dar kategoriler (manipulatif) ÖNCE: geniş olanlar toplam kotayı
+        # kapmadan kendi açıklarını kapatabilsinler.
+        for kat in sorted(temiz_kat, key=lambda k: len(temiz_kat[k])):
+            acik = kategori_hedefi.get(kat, 0) - kategori_sayaci[kat]
+            if acik <= 0:
+                continue
+            alinacak = min(acik, temiz_hedef - len(secilen_temiz))
+            if alinacak <= 0:
+                continue
+            pay = _cesitli_ornekle(temiz_kat[kat], fatura_map, alinacak, rnd)
+            secilen_temiz.extend(pay)
+            kategori_sayaci[kat] += len(pay)
+        # Hedefler karşılandıktan sonra hâlâ yer varsa (kategori havuzları
+        # tükendiyse) kalanı doğal dağılımdan tamamla.
+        if len(secilen_temiz) < temiz_hedef:
+            kalanlar = [f for f in temiz_no if f not in set(secilen_temiz)]
+            secilen_temiz.extend(
+                _cesitli_ornekle(kalanlar, fatura_map, temiz_hedef - len(secilen_temiz), rnd)
+            )
+    else:
+        secilen_temiz = _cesitli_ornekle(temiz_no, fatura_map, temiz_hedef, rnd)
 
     tum_secilen_no = list(secilen_anomalili) + secilen_temiz
     rnd.shuffle(tum_secilen_no)
@@ -527,6 +636,13 @@ def main():
              "VARSAYILAN KAPALI: override, aciklama_uretici'nin kalibre edilmiş anomali↔kategori "
              "korelasyonunu bozar ve etiket dosyasına geri yazılmadığı için metinle çelişir.",
     )
+    parser.add_argument(
+        "--kategori-hedefsiz", action="store_true",
+        help="[kota modu] Kategori-farkındalı SEÇİMİ kapat. Varsayılan AÇIK: hedef "
+             "kompozisyona (--kategori-oran-*) etiketi DEĞİŞTİRMEDEN, o kategoriye "
+             "sahip faturaları seçerek ulaşılır. Kapatılırsa kompozisyon havuzun "
+             "doğal dağılımına düşer (ölçüldü, 20k: %%56/30/7/8).",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Tekrarlanabilirlik için rastgelelik tohumu")
     args = parser.parse_args()
 
@@ -562,6 +678,7 @@ def main():
             temiz_orani_max=args.temiz_orani_max,
             hedef_kategori_oranlari=hedef_kategori_oranlari,
             kategori_override=args.kategori_override,
+            kategori_hedefli=not args.kategori_hedefsiz,
             seed=args.seed,
         )
         _kota_raporu_yazdir(rapor)

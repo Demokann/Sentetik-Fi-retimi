@@ -27,7 +27,9 @@ aciklama_mdler/*
 data/*
 qwen3*
 trendyol*
-
+temiz_urunler.csv.yedek
+anomali_urunler.csv.yedek
+temiz_urunler.csv.yedek_kurumsal
 
 # belirli klasörleri dahil et
 !data/urun_verileri/

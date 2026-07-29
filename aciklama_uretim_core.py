@@ -136,6 +136,25 @@ _RENK_KELIMELERI = {
     "sarı", "lacivert", "pembe", "mor", "kahverengi", "turuncu", "bej", "krem",
 }
 
+# LİSANS ŞARTI kuyruğu: 'Bitdefender GravityZone Business Security - 6 Kullanıcı
+# - 3 Yıl' gibi adlarda baş isim BAŞTADIR, sondaki kısım lisans şartıdır. Türkçe
+# "baş isim sonda" kuralı bu adlarda geçerli DEĞİL; sondan iki kelime alınınca
+# 'kullanıcı yıl' çıkıyordu (ölçüldü: 4000 faturada 486 kalem böyle bozuluyor,
+# 316'sı tam olarak 'kullanıcı yıl'). Bu kelimeler sondan atılır; hepsi
+# atıldığında geriye anlamlı bir baş isim kalmazsa BAŞTAN alınır.
+_LISANS_SARTI_KELIMELERI = {
+    "yil", "yıl", "yillik", "yıllık", "ay", "aylik", "aylık", "kullanici",
+    "kullanıcı", "cihaz", "server", "sunucu", "mobil", "pc", "bilgisayar",
+    "lisans", "lisansi", "lisansı", "kisi", "kişi", "user",
+    # AYNI SINIFTAN İKİNCİ KUYRUK (2026-07-29, ikinci pilot): paket ürünler
+    # '... + Google Play Hediye Kodu 100 TL' ile bitiyor -> sondan iki kelime
+    # 'kodu tl' veriyordu (ölçüldü: 2374 kalem, 1945'i tam olarak bu).
+    # Pilotta "Kodu tl aldım, müşteri sunumu için." diye görünüyordu.
+    "tl", "try", "kodu", "kod", "hediye", "bonus", "cek", "çek", "kupon",
+    # ölçü kuyrukları ('10x40 cm', '96x144x30 cm')
+    "cm", "mm", "mt", "inc", "inç", "li", "lu", "lı", "lü",
+}
+
 
 def kalem_adi_sadelestir(ad: str) -> str:
     """Ham kalem adını çalışanın yazacağı hâle indirger.
@@ -157,7 +176,20 @@ def kalem_adi_sadelestir(ad: str) -> str:
     while kelimeler and (_tr_normalize(kelimeler[-1]) in _OLCU_AMBALAJ_KELIMELERI
                          or _tr_normalize(kelimeler[-1]) in _RENK_KELIMELERI):
         kelimeler.pop()
-    return " ".join(kelimeler[-2:]).lower()
+
+    # Lisans şartı kuyruğunu at, ama SİL-BAŞTAN ALMA kararı için ayrı tut:
+    # kuyruk atıldıktan sonra geriye kelime kalmıyorsa ad tamamen şarttan
+    # ibaretti demektir, o zaman baştan almak tek doğru seçenek.
+    govde = list(kelimeler)
+    while govde and _tr_normalize(govde[-1]) in _LISANS_SARTI_KELIMELERI:
+        govde.pop()
+    if govde:
+        # Kuyruk gerçekten atıldıysa baş isim BAŞTA demektir (lisans adı);
+        # aksi halde Türkçe kuralı geçerli, sondan al.
+        if len(govde) < len(kelimeler):
+            return " ".join(govde[:2]).lower()
+        return " ".join(govde[-2:]).lower()
+    return " ".join(kelimeler[:2]).lower()
 
 
 def aykiri_kalem_bul(kalemler: list[dict]) -> dict | None:
@@ -2188,6 +2220,80 @@ def _tek_fatura_vs(fatura, etiket, model, host, keep_alive, kategori,
     if en_iyi_metin is None:
         return fatura, etiket, None, "VS: aday ayrıştırılamadı", [], 2
     return fatura, etiket, en_iyi_metin, None, en_iyi_ihl or [], 2
+
+
+# ---------------------------------------------------------------------------
+# ELEME KATMANI (2026-07-29) -- prompt'a DOKUNMADAN kaliteyi seçimde toplamak.
+#
+# ⚠️ ŞU AN BORU HATTINDA KAPALI. `aciklama_birlestir.py` bunu yalnız `--eleme`
+#    bayrağıyla çağırır (varsayılan KAPALI). Kod ileride geliştirilmek üzere
+#    duruyor; açmadan önce ELEME_IHLALLERI'ndeki enum_sizinti tartışması
+#    çözülmeli (bkz. aciklama_birlestir.aciklama_haritasi_kur docstring'i).
+#
+# NEDEN AYRI: `ihlalleri_bul`'a yeni kural eklemek retry tetikler; ölçüldü
+# (docs/faz-b-prompt.md §15), her ek kural retry oranını yükseltip çeşitliliği
+# düşürüyor ve 20k'da her 10 puan retry ≈ +8 saat. Buradaki kontroller ise
+# üretimden SONRA çalışır: düzeltmeye çalışmaz, kaydı veri setinden ELER.
+# Maliyeti sıfırdır (tek regex), riski de sıfırdır (prompt/retry davranışı
+# değişmez).
+#
+# İKİ KAYNAK:
+#   1) retry'dan SAĞ ÇIKAN sert ihlaller (`ELEME_IHLALLERI`) -- pilotta
+#      enum_sizinti 4/32 (%12,5) retry'a rağmen düzelmedi.
+#   2) `_kategori_kavrami_sizintisi_mi` -- enum_sizinti'nin YAKALAYAMADIĞI üst
+#      biçim. Model kategori ADINI değil, kategori KAVRAMINI sızdırıyor:
+#      "tavuk külbastı kategoriye giriyor". Bu cümle prompt'un YAPISINI
+#      anlatıyor (kalemler `Ad (kategori)` biçiminde sunuluyor), harcamayı
+#      değil. Hiçbir çalışan fişine "bu ürün şu kategoriye giriyor" yazmaz;
+#      yazarsa bu, şema bilgisinin metne sızması = leakage'dır.
+# ---------------------------------------------------------------------------
+
+# Retry'dan sağ çıktığında kaydın ELENMESİNİ gerektiren ihlaller. Ölçüt:
+# ihlal, etiketle korele bir ŞEMA/TALİMAT izi bırakıyor mu (leakage) --
+# yoksa yalnızca üslup kusuru mu. Üslup kusurları (pasif_kalip, uzunluk)
+# veri setinin doğal gürültüsüdür, ELENMEZ.
+ELEME_IHLALLERI: frozenset[str] = frozenset({
+    "enum_sizinti",     # sistem kategori adı metinde
+    "meta_sizinti",     # görevi/karakteri anlatıyor (ground-truth sızıntısı)
+    "sizinti",          # kategori/talimat sızıntısı
+    "latin_disi",       # bozuk çıktı
+    "red",              # model görevi reddetti
+    "kesik",            # cümle ortadan kesilmiş
+})
+
+# 'kategori' kelimesinin kendisi ve çekimli biçimleri. Doğal bir masraf notunda
+# fiilen hiç geçmez (bu yüzden yanlış-pozitif riski ihmal edilebilir), ama
+# prompt'taki `Ad (kategori)` biçimini anlatan model onu doğrudan kullanıyor.
+_KATEGORI_KAVRAMI = re.compile(
+    r"\b(?:kategori|kategoriye|kategorisi|kategorisine|kategorisinde|"
+    r"kategorisinden|kategoride|kategoriler|kategorilerine|"
+    r"harcama\s+kategori\w*|kalem\s+kategori\w*)\b"
+)
+
+
+def _kategori_kavrami_sizintisi_mi(metin: str) -> bool:
+    """Metin, kategori KAVRAMINI (adını değil) anlatıyor mu?
+
+    'tavuk külbastı kategoriye giriyor' -> True. `enum_sizinti` bunu kaçırır
+    çünkü orada aranan şey kategori ADIdır ('yemek hizmeti'), burada geçen ise
+    'kategori' kelimesinin kendisi."""
+    return bool(_KATEGORI_KAVRAMI.search(_tr_normalize(metin)))
+
+
+def elenmeli_mi(metin: str, kalan_ihlaller: list[str] | None = None) -> tuple[bool, str]:
+    """(elenmeli_mi, sebep). Sebep raporlamada gruplanır; elenmezse ("", ) döner.
+
+    Boru hattında SON adımda çağrılır (aciklama_birlestir.py). Üretim/retry
+    akışını etkilemez -- amaç düzeltmek değil, kötü kaydı veri setine
+    SOKMAMAKTIR."""
+    if not metin or not metin.strip():
+        return True, "bos_metin"
+    if _kategori_kavrami_sizintisi_mi(metin):
+        return True, "kategori_kavrami"
+    sert = sorted(set(kalan_ihlaller or []) & ELEME_IHLALLERI)
+    if sert:
+        return True, "ihlal:" + ",".join(sert)
+    return False, ""
 
 
 def tek_fatura_isleme(fatura, etiket, model, host, keep_alive: str | int | None = None):

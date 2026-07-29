@@ -15,7 +15,7 @@ YEMEK_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "urun_verileri" /"
 DANISMANLIK_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"danismanlik_urunleri.csv"
 KONAKLAMA_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"konaklama_urunleri.csv"
 ULASIM_URUNLERI_CSV = Path(__file__).parent.parent / "data" /  "hizmet_verileri" /"ulasim_urunleri.csv"
-ANOMALI_URUNLERI_CSV = Path(__file__).parent.parent / "data" / "anomali_veri" / "anomali_urunler.csv"
+ANOMALI_URUNLERI_CSV = Path(__file__).parent.parent / "data" / "anomali_verileri" / "anomali_urunler.csv"
 
 # CSV kategorisi -> HarcamaKategorisi eşlemesi. Karşılığı olmayan satırlar
 # (KAĞIT/EV/BEBEK/PET gibi şu anki şemada kategorisi bulunmayanlar) BİLİNÇLİ
@@ -218,6 +218,29 @@ def ulasim_urunleri_yukle(dosya_yolu: Path = ULASIM_URUNLERI_CSV) -> dict[Harcam
             havuzlar.setdefault(kategori, []).append((urun, birim))
 
     return havuzlar
+def _csv_yok_uyar(dosya_yolu: Path, sonuc: str) -> None:
+    """
+    Eksik CSV'yi GURULTULU bildirir.
+
+    SESSIZ DUSMEK PAHALIYA MAL OLDU (2026-07-29): `data/anomali_veri` dizini
+    `data/anomali_verileri` olarak yeniden adlandirilinca (gitignore istisnasina
+    uydurmak icin) bu dosya bulunamadi. Iki yukleyici de sessizce bos dondu:
+      - ACIKLAMA_HAVUZU yasakli kategorileri 3-4 elemanli sabit listeye dustu
+      - ANOMALI_URUN_MAKULLUGU bos kaldi -> satici-ekseni ayrimi devre disi
+    Sonuc: 100k'lik bir uretim, yasakli kategoride 4 urun cesitliligiyle ve
+    %100 etiket ortusmesiyle tamamlandi -- TEK BIR HATA MESAJI OLMADAN.
+
+    Geri dusme davranisi KORUNUYOR (kirilgan import zinciri istemiyoruz) ama
+    artik sessiz degil.
+    """
+    import warnings
+    warnings.warn(
+        f"\n  CSV BULUNAMADI: {dosya_yolu}\n  -> {sonuc}\n"
+        "  -> uretime devam etmeden once yolu duzeltin.",
+        RuntimeWarning, stacklevel=3,
+    )
+
+
 def anomali_urunleri_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dict[HarcamaKategorisi, list[str]]:
     """
     anomalili_veriler.csv'yi (kategori, urun_adi sutunlari) okur. kategori
@@ -230,6 +253,7 @@ def anomali_urunleri_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dict[Harc
     import csv as _csv
     havuzlar: dict[HarcamaKategorisi, list[str]] = {}
     if not dosya_yolu.exists():
+        _csv_yok_uyar(dosya_yolu, "yasakli kategori havuzlari 3-4 elemanli sabit listeye DUSUYOR")
         return havuzlar
     with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
         reader = _csv.DictReader(f)
@@ -274,6 +298,7 @@ def anomali_urun_makullugu_yukle(dosya_yolu: Path = ANOMALI_URUNLERI_CSV) -> dic
     import csv as _csv
     makullik: dict[str, set[str]] = {}
     if not dosya_yolu.exists():
+        _csv_yok_uyar(dosya_yolu, "satici-ekseni ayrimi DEVRE DISI (yasakli kalem = otomatik is_kolu uyumsuzlugu)")
         return makullik
     with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
         reader = _csv.DictReader(f)
@@ -886,9 +911,52 @@ def rastgele_kimlik_no(firma_turu: FirmaTuru) -> str:
         return rastgele_tckn()
     return rastgele_vkn()
 
+# faker Türkçe adlara akademik/mesleki unvan ekleyebiliyor ('Dr. İşcan Gülen',
+# 'Doç. Zinnure Bilir Durdu', 'Arş. Gör. Nazi Hekime Zengin'). Bir MARKET'in
+# unvanı "Doç. ..." olamaz. Çok parçalı unvanlar için TEKRARLI eşleşme (`+`).
+# Ölçüldü (6000 ad): Öğr. Dr. Doç. Okt. Av. 'Arş. Gör.' 'Yrd. Doç.' Çev. Prof. Uz.
+_UNVAN_ONEKLERI = re.compile(
+    r"^(?:(?:Dr|Doç|Prof|Op|Av|Uz|Uzm|Yrd|Müh|Öğr|Gör|Arş|Okt|Çev)\.\s*)+",
+    re.IGNORECASE,
+)
+
+# Şahıs şirketinin TİCARİ UNVAN kelimesi. IS_KOLU_SEKTOR_KELIME'den AYRI tutulur
+# çünkü oradaki kelimeler bir hukuki ekle birlikte kullanılmak üzere seçilmiş
+# ('Lezzet' + 'Gida San. ve Tic. Ltd. Şti.'); tek başına bırakıldığında işletme
+# adı gibi okunmuyor ('Oğuzman Çetin Lezzet'). Buradakiler TEK BAŞINA bir dükkân
+# adı tamamlar ('Oğuzman Çetin Lokantası').
+SAHIS_TICARI_UNVAN = {
+    IsKolu.RESTORAN: ["Lokantası", "Restoran", "Kebap Salonu", "Kafe"],
+    IsKolu.MARKET: ["Market", "Bakkaliyesi", "Gıda", "Şarküteri"],
+    IsKolu.OTEL: ["Oteli", "Pansiyonu", "Konukevi"],
+    IsKolu.OFIS_TEDARIK: ["Kırtasiye", "Büro Malzemeleri", "Ofis Market"],
+    IsKolu.TEKNOLOJI: ["Bilişim", "Bilgisayar", "Teknoloji"],
+    IsKolu.DANISMANLIK_FIRMASI: ["Danışmanlık", "Müşavirlik", "Denetim"],
+    IsKolu.LOJISTIK_FIRMASI: ["Nakliyat", "Kargo", "Lojistik"],
+    IsKolu.ULASIM_SAGLAYICI: ["Turizm", "Taşımacılık", "Oto Kiralama"],
+    IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Davet Evi"],
+    IsKolu.GIYIM_MAGAZASI: ["Giyim", "Tekstil", "Konfeksiyon"],
+    IsKolu.KISISEL_BAKIM: ["Kuaför", "Güzellik Salonu", "Kozmetik"],
+}
+
+
 def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru, kalemler=None) -> str:
     if firma_turu == FirmaTuru.SAHIS_SIRKETI:
-        return fake.name()
+        # ŞAHIS ŞİRKETİ = kişi adı + TİCARİ UNVAN (2026-07-29).
+        #
+        # Eskiden çıplak `fake.name()` dönüyordu ve fiş "Özertem Alemdar" diye
+        # bir satıcı gösteriyordu. Faz B'de bu doğrudan saçma cümle üretiyordu:
+        # "Özertem Alemdar'dan karides güveç aldım", "Dr. İşcan Gülen'den
+        # deterjan" -- model adı bir İŞLETME değil bir KİŞİ gibi okuyor, çünkü
+        # metinde işletmeye dair hiçbir iz yok. (Ölçüldü: registry'nin %15'i,
+        # pilotun %12'si.)
+        #
+        # Gerçek hayatta şahıs şirketi faturası da bir ticari unvan taşır
+        # ('İşcan Gülen Market'). Hukuki ek (A.Ş./Ltd. Şti.) EKLENMEZ -- o
+        # tüzel kişiliğe aittir, şahıs şirketinde bulunmaz.
+        kisi = _UNVAN_ONEKLERI.sub("", fake.name()).strip()
+        unvan = random.choice(SAHIS_TICARI_UNVAN[is_kolu])
+        return f"{kisi} {unvan}"
 
     # Sektör kelimesi fişteki kalemlerle tutarlı seçilir (ör. 'Taksi' yalnız
     # faturada taksi kalemi varsa). kalemler verilmezse jeneriklere düşülür.
@@ -1051,6 +1119,45 @@ def rastgele_fatura_no(fatura_tarihi: str) -> str:
 TEKIL_ZORUNLU_ACIKLAMALAR = {"Taksi Ücreti", "Yakit Gideri"}
 
 
+# İş kolu başına kalem sayısı TAVANI.
+#
+# NEDEN: kalem sayısı eskiden `randint(1, 8)` ile HER iş kolunda aynıydı --
+# ölçüldü, 100k'da her sektörün ortalaması 4,56-4,60 ve faturaların ~%63'ü
+# 4+ kalemliydi. Bu, hizmet sektörlerinde gerçek dışı fişler üretiyordu:
+# tek fişte "Feribot Bileti + İstanbulkart + LPG + Metro + Uçak Bileti" ya da
+# bir danışmanlık faturasında altı ayrı hizmet kalemi. Gerçek hayatta feribota
+# binersin, fişi ayrıdır; akbil yüklersin, fişi ayrıdır.
+#
+# Faz B'ye ETKİSİ (asıl gerekçe): açıklama üretiminde modelin tek cümlede
+# uzlaştırması gereken heterojen kalem sayısı düşer -- halüsinasyon yüzeyi ve
+# uzunluk baskısı azalır. Pilotta gözlenen "araç kiraladım" (4 farklı ulaşım
+# kalemi varken) tipi eksik/yanlış özetlemelerin kaynağı buydu.
+#
+# TEKIL_ZORUNLU_ACIKLAMALAR bu mekanizmanın KALEM düzeyindeki dar hâliydi
+# (yalnız taksi/yakıt); burası iş kolu düzeyine genelleştirir, ikisi birlikte
+# çalışır (tekil zorunlu kalem seçilirse tavan ne olursa olsun fatura 1 kaleme
+# iner).
+#
+# Tavanı YÜKSEK kalan üçlü bilinçlidir: market sepeti, grup yemeği ve
+# kırtasiye toplu alımı gerçekten çok kalemlidir. Otel folyosu da doğal olarak
+# birkaç satırdır (konaklama + kahvaltı + geç çıkış), o yüzden orta seviyede.
+IS_KOLU_KALEM_TAVANI: dict[IsKolu, int] = {
+    IsKolu.ULASIM_SAGLAYICI: 1,      # taksi/feribot/akbil/yakıt: tek olay, tek fiş
+    IsKolu.DANISMANLIK_FIRMASI: 2,   # bir sözleşme = bir hizmet kalemi
+    IsKolu.LOJISTIK_FIRMASI: 2,      # tek sevkiyat/kargo
+    IsKolu.TEKNOLOJI: 3,             # cihaz + lisans makul
+    IsKolu.GIYIM_MAGAZASI: 3,
+    IsKolu.KISISEL_BAKIM: 3,
+    IsKolu.ORGANIZASYON: 4,
+    IsKolu.OTEL: 5,                  # folyo doğal olarak çok satırlı
+    IsKolu.RESTORAN: 8,              # grup yemeği
+    IsKolu.MARKET: 8,                # market sepeti
+    IsKolu.OFIS_TEDARIK: 8,          # kırtasiye toplu alım
+}
+
+VARSAYILAN_KALEM_TAVANI = 8
+
+
 # --- Firma Registry (tek kalıcı firma-kimliği kaynağı) ---
 # Firma kişiliği artık FATURA bazlı DEĞİL, FIRMA bazlıdır: ad + kimlik no +
 # is_kolu + firma_türü tek bir registry'de (data/firma_registry.csv) DONAR ve
@@ -1124,8 +1231,10 @@ def rastgele_fatura() -> Fatura:
         len(ACIKLAMA_HAVUZU[kategori]) for kategori in izinli_kategoriler
     )
 
-    # Kalem sayisi, mevcut çeşitliliği aşmasin (en fazla 8, ama havuz küçükse ona göre kisitla)
-    ust_sinir = min(8, toplam_musait_aciklama)
+    # Kalem sayisi: iş koluna göre TAVAN (bkz. IS_KOLU_KALEM_TAVANI gerekçesi)
+    # ve havuz çeşitliliği -- ikisinden küçüğü.
+    is_kolu_tavani = IS_KOLU_KALEM_TAVANI.get(is_kolu, VARSAYILAN_KALEM_TAVANI)
+    ust_sinir = min(is_kolu_tavani, toplam_musait_aciklama)
     kalem_sayisi = random.randint(1, max(1, ust_sinir))
 
     kullanilan_aciklamalar: set[str] = set()
