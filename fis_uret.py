@@ -27,6 +27,7 @@ görselde tespit edilebilir hale gelir.
 """
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -83,19 +84,72 @@ def kalem_gosterimi(kalem: dict) -> dict:
     }
 
 
+def _kayit_hash(kayit_id: str) -> int:
+    """kayit_id -> kararli tamsayi. random DEĞİL: ayni fatura her koşuda ayni
+    şabloni/saati almali, yoksa resume ile yeniden üretilen fiş öncekinden
+    farkli görünür."""
+    return int(hashlib.md5(kayit_id.encode("utf-8")).hexdigest(), 16)
+
+
+def tarih_tr(iso_tarih: str) -> str:
+    """'2026-07-26' -> '26.07.2026'."""
+    y, a, g = iso_tarih.split("-")
+    return f"{g}.{a}.{y}"
+
+
+def saat_uret(kayit_id: str) -> str:
+    """Fiş saati (08:00-20:59). Veride saat alani YOK, gerçek fişte var.
+
+    kayit_id'den türetilir: hem kararlidir hem de etiketlerle KORELASYONSUZDUR.
+    Saati anomaliye/kategoriye bağli üretmek görsele sahte bir sinyal ekler ve
+    aşaği akiştaki model onu kisayol olarak öğrenir."""
+    h = _kayit_hash(kayit_id)
+    return f"{8 + h % 13:02d}:{(h // 13) % 60:02d}"
+
+
+def kdv_gruplari_kur(kalemler: list[dict]) -> list[dict]:
+    """KDV oranina göre kirilim (e-arşiv fişindeki KDV tablosu için).
+
+    Kalem düzeyindeki `kdv_tutari`ndan toplanir -- `kdv_tutari` anomalisi
+    böylece bu tabloda da iz birakir."""
+    gruplar: dict[float, dict] = {}
+    for k in kalemler:
+        g = gruplar.setdefault(k["kdv_orani"], {"oran": k["kdv_orani"], "kdv": 0.0, "toplam": 0.0})
+        g["kdv"] += k["kdv_tutari"]
+        g["toplam"] += k["satir_toplam"]
+    for g in gruplar.values():
+        g["kdv"] = round(g["kdv"], 2)
+        g["toplam"] = round(g["toplam"], 2)
+    return [gruplar[o] for o in sorted(gruplar)]
+
+
 def baglam_kur(fatura: dict) -> dict:
-    """fatura_to_dict çiktisi + şablonun ihtiyaç duyduğu türetilmiş alanlar."""
+    """fatura_to_dict çiktisi + şablonlarin ihtiyaç duyduğu türetilmiş alanlar."""
     baglam = dict(fatura)
     baglam["satici_kimlik_etiketi"] = kimlik_etiketi(fatura["satici_vkn"])
     baglam["kalemler"] = [kalem_gosterimi(k) for k in fatura["kalemler"]]
+    baglam["fatura_tarihi_tr"] = tarih_tr(fatura["fatura_tarihi"])
+    baglam["saat"] = saat_uret(fatura["kayit_id"])
+    baglam["kdv_gruplari"] = kdv_gruplari_kur(fatura["kalemler"])
     return baglam
+
+
+def sablon_sec(fatura: dict, sablonlar: list) -> object:
+    """Faturaya şablon atar. Tek şablonla üretilen 25k fişin hepsi ayni
+    göründüğü için model fiş tipini değil tek bir düzeni öğreniyordu.
+
+    Seçim kayit_id'den DETERMİNİSTİK (bkz. _kayit_hash) ve etiketten
+    BAĞIMSIZ: fiş tipini anomaliye bağlamak görsele sahte sinyal ekler."""
+    return sablonlar[_kayit_hash(fatura["kayit_id"]) % len(sablonlar)]
 
 
 def main():
     parser = argparse.ArgumentParser(description="JSON faturalardan fiş (receipt) görseli üretir")
     parser.add_argument("--input-json", required=True, help="faturalar.json dosya yolu")
     parser.add_argument("--output-dir", default="data/fisler", help="Görsellerin kaydedileceği klasör")
-    parser.add_argument("--template", default="make_receipt.html", help="Jinja2 HTML şablon dosyasının yolu")
+    parser.add_argument("--template", default="make_receipt.html,fis_sablon_2.html",
+                        help="Jinja2 şablon yolu/yolları (virgülle ayır). Birden fazlaysa her "
+                             "faturaya kayit_id'den deterministik olarak biri atanır.")
     parser.add_argument("--limit", type=int, default=None, help="Test için ilk N faturayı işle (varsayılan: hepsi)")
     parser.add_argument("--yeniden", action="store_true",
                         help="Var olan PNG'leri de yeniden üret (varsayılan: atlanır, resume)")
@@ -110,12 +164,14 @@ def main():
     if args.limit:
         faturalar = faturalar[: args.limit]
 
-    sablon_yolu = Path(args.template)
-    env = Environment(loader=FileSystemLoader(str(sablon_yolu.parent or Path("."))))
+    yollar = [Path(y.strip()) for y in args.template.split(",") if y.strip()]
+    dizinler = sorted({str(y.parent or Path(".")) for y in yollar})
+    env = Environment(loader=FileSystemLoader(dizinler))
     env.filters["tutar"] = tutar_formatla
-    template = env.get_template(sablon_yolu.name)
+    sablonlar = [env.get_template(y.name) for y in yollar]
 
-    print(f"{len(faturalar)} fatura için fiş üretiliyor...")
+    print(f"{len(faturalar)} fatura için fiş üretiliyor "
+          f"({len(sablonlar)} şablon: {', '.join(y.name for y in yollar)})...")
 
     uretilen = atlanan = hatali = 0
     with sync_playwright() as p:
@@ -134,7 +190,8 @@ def main():
                 continue
 
             try:
-                sayfa.set_content(template.render(**baglam_kur(fatura)))
+                sablon = sablon_sec(fatura, sablonlar)
+                sayfa.set_content(sablon.render(**baglam_kur(fatura)))
                 sayfa.locator(".receipt-container").screenshot(path=str(cikti_yolu))
                 uretilen += 1
             except Exception as e:
