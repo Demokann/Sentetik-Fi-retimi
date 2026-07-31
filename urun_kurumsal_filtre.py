@@ -53,9 +53,31 @@ def normalize(metin: str) -> str:
     return metin.translate(esleme).lower()
 
 
-def _desen(kelimeler: list[str]) -> re.Pattern:
-    """Kelime-sinirli VEYA deseni. `\\b` SART: 'kol' -> 'koltuk'u yakalamasin."""
-    return re.compile(r"\b(?:" + "|".join(kelimeler) + r")\b")
+def _desen(kelimeler: list[str], ek_duyarli: bool = False) -> re.Pattern:
+    """Kelime-sinirli VEYA deseni. Bastaki `\\b` SART: 'kol' -> 'koltuk'u yakalamasin.
+
+    `ek_duyarli=True` ise SONDAKI `\\b` kaldirilir, yani Turkce ek almis bicimler
+    de yakalanir ('bebek' -> 'bebeklere', 'yumusatici' -> 'yumusaticisi').
+
+    NEDEN HER KATEGORIDE ACIK DEGIL (2026-07-30'da olculdu): sondaki `\\b`
+    kaldirilinca kisa kelimeler mesru urunleri de eliyor --
+      giyim         : 'taki' -> 'Esofman TAKIMI', 'sal' -> 'SALas Gomlek', 'kus' -> 'KUSak'
+      kisisel_bakim : 'parfum' -> 'PARFUMsuz Sampuan' (tam TERS anlam!), 'far' -> 'FARmasi' (marka)
+    O yuzden kategori bazinda secilir (bkz. KARA_LISTE_EK_DUYARLI): yalniz
+    kazanci kaybindan buyuk olan kategorilerde acik.
+    """
+    son = "" if ek_duyarli else r"\b"
+    return re.compile(r"\b(?:" + "|".join(kelimeler) + r")" + son)
+
+
+# Ek-duyarli (prefix) eslesme YALNIZ bu kategorilerde. Olculen kazanc/kayip:
+#   temel_gida   : 190 kacak yakalanir (%10,8), 1 yanlis pozitif ('proteinli tarhana')
+#                  -- 'Bebeklere Ozel Camasir Deterjani', 'Bebegimin Ilk Corbasi',
+#                  'Cocuklara Ozel Conditioner', 'Babyjem Konak Taragi' bunlar.
+#   ofis_mobilya : 2 kacak ('Tv Sehpasi'), yanlis pozitif yok.
+# teknoloji_ekipman KAPALI birakildi: 33 kacagin cogu 'kilif' uzerinden
+# 'Laptop Cantasi/Kilifi' ve bir sirketin laptop cantasi almasi mesrudur.
+KARA_LISTE_EK_DUYARLI = {"temel_gida", "ofis_mobilya"}
 
 
 # --------------------------------------------------------------------------
@@ -115,6 +137,38 @@ KARA_LISTE: dict[str, list[str]] = {
         # yatak odasi / cocuk odasi
         "yatak odasi", "bas ucu", "gardirop", "sifonyer", "besik", "dolap ici",
         "cekmece ici",
+        # 2026-07-30 -- jenerik beyaz terimler cikarildiktan SONRA hala gecen
+        # baglamlar. Hepsi DAR ve iki-kelimeli tutuldu; tek kelimelik genis
+        # bir terim ('stand', 'sepet') mesru ofis urunlerini de olurdu.
+        "buzdolabi", "bavul", "valiz", "baza alti", "petek ustu", "tezgah ustu",
+        "lambader", "takilik", "taki standi", "kupelik", "kolye", "bileklik",
+        "mouse pad", "gaming", "oyuncu", "gamer",
+        "balkon", "bahce", "teras", "rattan", "kanepe", "oturma grubu",
+        "tv sehpa", "tv unitesi", "tepsi", "tepsisi", "tesbih",
+        "folyo", "folyosu", "kaplama", "duvar rafi", "ucan raf", "gizli raf",
+        # EK-DUYARLI VARYANTLAR: _desen `\b(?:...)\b` kurdugu icin (satir 58)
+        # kara liste Turkce ekli bicimleri KACIRIYOR -- 'cerceve' deseni
+        # 'Cercevesi'ni yakalamiyordu ve 'Evrak Cercevesi' havuza girmisti.
+        # _desen'i topluca gevsetmek bes kategoride asiri-eslesme riski
+        # tasidigi icin ekli bicimler tek tek yaziliyor.
+        "cercevesi", "cerceveli", "ortusunu", "yastigi", "mutfagi",
+        "battaniyesi", "salı", "sali", "saati", "hali yikama",
+        # Jenerik "ofis" beyaz terimi (cikarilamaz, en onemli terim) dekorasyon ve
+        # ev aydinlatmasini geciriyordu: 'Tavan Wc Kiler OFIS Lambasi', 'Roma
+        # Rakamli Saat ... Dua Et' (duvar susu). Beyaz terimi zayiflatmak yerine
+        # bu baglamlar kara listeye alindi.
+        "roma rakamli", "dua", "allah", "muhammed", "vav",
+        "wc", "kiler", "tavan", "armatur", "sıva ustu", "siva ustu",
+        # Imla/bitisik yazim kacaklari (ayni \b katiligi): kara listede 'gardirop'
+        # var ama urun 'Gardrop' yazmis; 'zigon' var ama 'Zigonsehpa' bitisik
+        # oldugu icin sondaki \b tutmuyor.
+        "gardrop", "zigonsehpa",
+        # Jenerik 'dolap' ve 'koltuk' beyaz terimlerinin gecirdikleri (bunlar
+        # cikarilamaz -- 'dosya dolabi' ve 'ofis koltugu' kategorinin cekirdegi).
+        # UZUN KUYRUK: burada durduruldu, kalan sizinti ~%6. Kuratorlu cekirdek
+        # (40 kalem, havuzun %29'u) gercekci bir taban garanti ediyor.
+        "kiyafet", "t shirt", "tshirt", "armut koltuk", "bez dolap",
+        "dolap organizeri", "yatak dolap",
     ],
     "temel_gida": ORTAK_B2C + [
         # takviye / sporcu gidasi
@@ -137,8 +191,20 @@ KARA_LISTE: dict[str, list[str]] = {
         # gida DISI sizintilar (marka adi kelime-sinirini deldigi icin acikca yazildi)
         "bebekevi", "marimo", "ates olcer", "atesolcer", "termometre",
         "klavye", "airfryer", "fritoz", "pisirme kagidi", "melamin",
+        # KOZMETIK, gida kategorisine YANLIS etiketlenmis (kaynak veri hatasi):
+        # 'Gogus Bakim Kremi', 'Gogus Dolgunlastirici'. Desenler DAR yazildi --
+        # yalin 'gogus' kullanilamaz, 'Gogus ve Sirt Cantasi' mesru bir urun.
+        "gogus bakim", "gogus kremi", "gogus dolgunlastirici", "gogus kalkani",
+        "dolgunlastirici", "dikleştirici", "diklestirici", "sarkiklik",
+        "anne sutu", "gida takviyesi", "sut arttirici",
     ],
     "kisisel_bakim": ORTAK_B2C + [
+        # TEDAVI/BAKIM kozmetigi -- kurumsal masrafta karsiligi yok. Hijyen
+        # sarfi (sabun, dezenfektan, tiras) beyaz listede KALIR.
+        "leke karsiti", "leke karşıtı", "anti aging", "anti-aging", "yaslanma",
+        "yaşlanma", "kirisiklik", "kırışıklık", "gozenek", "gözenek",
+        "dokulme karsiti", "dökülme karşıtı", "biotin", "kolajen", "collagen",
+        "aydinlatici", "aydınlatıcı", "sivilce", "sivilce karsiti",
         # hobi kozmetik / parfumeri (kurumsal masrafta karsiligi yok)
         "parfum", "edp", "edt", "kolonya sise", "makyaj", "ruj", "far", "maskara",
         "oje", "manikur", "pedikur", "kirpik", "kas", "peeling", "serum",
@@ -195,11 +261,23 @@ BEYAZ_LISTE: dict[str, list[str]] = {
     # dolap/raf' kaldi ama kara listedeki mutfak sozcukleri onlari dengeliyor.
     "ofis_mobilya": [
         "ofis", "calisma masasi", "toplanti masasi", "buro", "sandalye",
-        "koltuk", "sehpa", "dolap", "dosya dolabi", "raf", "kitaplik",
+        "koltuk", "sehpa", "dolap", "dosya dolabi", "kitaplik",
         "etajer", "keson", "pano", "beyaz tahta", "yazi tahtasi",
         "portmanto", "askilik", "projeksiyon perdesi",
-        "duzenleyici", "organizer", "evrak", "dosyalik", "masa lambasi",
+        "evrak", "dosyalik", "masa lambasi",
         "monitor standi", "laptop standi",
+        # 2026-07-30: JENERIK UCLU CIKARILDI -> "raf", "duzenleyici", "organizer".
+        # Olculdu: 249 kalemlik havuzun %25'ini tek basina "organizer", %17'sini
+        # "raf" geciriyordu ve gecirdikleri ofis urunu DEGILDI: 'Buzdolabi Ici
+        # Organizer', 'Bavul Ici Duzenleyici', 'Baza Alti Organizer', 'Sise
+        # Duzenleyici Raf', 'Ucan Raf', 'Petek Ustu Raf'. Bu, §17.1'in
+        # "kalibrasyon tuzagi" notunun `sunum`/`kasa`/`cekmece` icin soyledigi
+        # durumun aynisi -- jenerik terim mutfak/ev urununu geciriyor.
+        # Cozum kara listeye eklemek DEGIL (kara liste once calisir, "monitor
+        # standi" gibi mesru beyaz terimleri de oldururdu); jenerik terimi
+        # cikarip DAR bicimlerini yazmak.
+        "dosya rafi", "evrak rafi", "arsiv rafi", "masa ustu duzenleyici",
+        "kalemlik", "flipchart", "su sebili",
     ],
     # kisisel_bakim havuzu da (giyim gibi) neredeyse tamamen B2C kozmetik.
     # Kurumsal karsiligi olan tek alt kume HIJYEN/SARF: el sabunu, dezenfektan,
@@ -228,7 +306,10 @@ BEYAZ_LISTE: dict[str, list[str]] = {
 
 BEYAZ_LISTE_ZORUNLU = set(BEYAZ_LISTE.keys())
 
-_KARA_DESEN = {kat: _desen([normalize(k) for k in kelimeler]) for kat, kelimeler in KARA_LISTE.items()}
+_KARA_DESEN = {
+    kat: _desen([normalize(k) for k in kelimeler], kat in KARA_LISTE_EK_DUYARLI)
+    for kat, kelimeler in KARA_LISTE.items()
+}
 _BEYAZ_DESEN = {kat: _desen([normalize(k) for k in kelimeler]) for kat, kelimeler in BEYAZ_LISTE.items()}
 
 
