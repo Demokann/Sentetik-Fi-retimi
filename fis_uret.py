@@ -31,7 +31,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, Template
 from playwright.sync_api import sync_playwright
 
 from generators.field_generator import TAM_SAYI_BIRIMLERI
@@ -134,7 +134,7 @@ def baglam_kur(fatura: dict) -> dict:
     return baglam
 
 
-def sablon_sec(fatura: dict, sablonlar: list) -> object:
+def sablon_sec(fatura: dict, sablonlar: list[Template]) -> Template:
     """Faturaya şablon atar. Tek şablonla üretilen 25k fişin hepsi ayni
     göründüğü için model fiş tipini değil tek bir düzeni öğreniyordu.
 
@@ -147,7 +147,7 @@ def main():
     parser = argparse.ArgumentParser(description="JSON faturalardan fiş (receipt) görseli üretir")
     parser.add_argument("--input-json", required=True, help="faturalar.json dosya yolu")
     parser.add_argument("--output-dir", default="data/fisler", help="Görsellerin kaydedileceği klasör")
-    parser.add_argument("--template", default="make_receipt.html,fis_sablon_2.html",
+    parser.add_argument("--template", default="fis_sablon_1.html,fis_sablon_2.html",
                         help="Jinja2 şablon yolu/yolları (virgülle ayır). Birden fazlaysa her "
                              "faturaya kayit_id'den deterministik olarak biri atanır.")
     parser.add_argument("--limit", type=int, default=None, help="Test için ilk N faturayı işle (varsayılan: hepsi)")

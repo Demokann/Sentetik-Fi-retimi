@@ -5,19 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>masrafAI - Sentetik Fiş (e-Arşiv)</title>
 <!--
-  İKİNCİ FİŞ TİPİ (2026-07-31). make_receipt.html ile DÖNÜŞÜMLÜ kullanılır:
+  İKİNCİ FİŞ TİPİ (2026-07-31). fis_sablon_1.html ile DÖNÜŞÜMLÜ kullanılır:
   tek şablonla üretilen 25k fişin hepsi aynı görününce model fiş tipini değil
   tek bir düzeni öğreniyor. Şablon seçimi fis_uret.py:sablon_sec'te kayit_id'den
   DETERMİNİSTİK -- aynı fatura her koşuda aynı şablonu alır (resume'de fiş
   değişmesin).
 
-  Aritmetik make_receipt.html ile AYNI olmak ZORUNDA (fis_uret.py:kalem_gosterimi):
+  Aritmetik fis_sablon_1.html ile AYNI olmak ZORUNDA (fis_uret.py:kalem_gosterimi):
   fiyat sütunu iskonto ÖNCESİ brüt (KDV dahil), İNDİRİM gerçek düşüm,
   brut - indirim = satir_toplam. İki şablon iki farklı aritmetik gösterirse
   aşağı akıştaki model tutarsızlığı fiş tipiyle karıştırır.
 
   .receipt-container sınıfı ZORUNLU: fis_uret.py ekran görüntüsünü bu seçiciyle
-  alıyor (make_receipt.html ile aynı seçici).
+  alıyor (fis_sablon_1.html ile aynı seçici).
 -->
 <style>
     body { background-color: #f0f0f0; display: flex; justify-content: center; padding: 20px; font-family: Arial, sans-serif; }
@@ -68,7 +68,11 @@
         <!-- Kalemler -->
         {% for kalem in kalemler %}
         <div style="margin-bottom: 8px;">
-            <div class="item-detail">{{ kalem.miktar }} {{ kalem.birim }} x {{ kalem.brut_birim | tutar }} TL/{{ kalem.birim }}</div>
+            <!-- Birim adı yalnız BAŞTA: "1 Adet x 396,68 TL/Adet" biçiminde birim
+                 iki kez geçiyordu. Sondaki "/Adet" gerçek fişte birim fiyat
+                 notasyonu olarak kullanılır ama baştaki miktarla birlikte
+                 gereksiz tekrar oluyor. -->
+            <div class="item-detail">{{ kalem.miktar }} {{ kalem.birim }} x {{ kalem.brut_birim | tutar }} TL</div>
             <div class="row">
                 <span class="item-name">{{ kalem.aciklama }}</span>
                 <span class="item-kdv">%{{ kalem.kdv_orani | int }}</span>
@@ -87,7 +91,7 @@
         <div class="solid"></div>
 
         <!-- Toplamlar. ARA TOPLAM zorunlu: footer_kismi anomalisi vergisiz
-             tutar ile KDV'den yalnız birini bozuyor (bkz. make_receipt.html). -->
+             tutar ile KDV'den yalnız birini bozuyor (bkz. fis_sablon_1.html). -->
         <div class="row"><span>ARA TOPLAM</span><span>{{ toplam_vergisiz_tutar | tutar }} TL</span></div>
         <div class="row"><span>TOPLAM KDV</span><span>{{ toplam_kdv_tutari | tutar }} TL</span></div>
         <div class="row bold" style="font-size: 14px;"><span>TOPLAM</span><span>{{ genel_toplam | tutar }} TL</span></div>
