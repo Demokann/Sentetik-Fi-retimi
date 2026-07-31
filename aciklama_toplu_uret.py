@@ -12,6 +12,7 @@ Kesilirse (Ctrl-C / çökme / ertesi gün) aynı komut kaldığı yerden devam e
 import argparse
 import json
 import re
+import sys
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -111,6 +112,10 @@ def main():
              "resume yine çalışır çünkü asıl durum batch_NNNN_ciktilar.json'dadır.",
     )
     parser.add_argument("--insan-md", action="store_true", help="İnsan incelemesi için ayrıca MD raporu yaz")
+    parser.add_argument("--ilerleme", type=int, default=1000,
+                        help="Her N kayıtta bir STDERR'e kilometre taşı bas (0 = kapalı). "
+                             "Fatura başına satır STDOUT'a gider; notebook'ta sadece stdout'u "
+                             "dosyaya yönlendirirsen (2>&1 YAZMA) ilerleme canlı görünür.")
     parser.add_argument("--sicaklik-tavani", type=float, default=None,
                         help="Kategori sicakliklarina TAVAN uygula (or. 0.9). OpenAI-uyumlu saglayicilarda min_p guvenlik agi olmadigi icin 1.1 ciplak kalir.")
     args = parser.parse_args()
@@ -261,6 +266,18 @@ def main():
                     ihlal_notu = f", kalan_ihlal={ihlaller}" if ihlaller else ""
                     yakin_notu = ", yakin_kopya" if yakin else ""
                     print(f"    [{genel_uretilen}] {fno} ({kategori}, deneme={deneme_sayisi}{ihlal_notu}{yakin_notu})")
+
+                    # KİLOMETRE TAŞI -> STDERR. Fatura başına satır (stdout)
+                    # notebook'ta 25.000 satır demek, o yüzden log dosyasına
+                    # yönlendiriliyor; ama o zaman koşu boyunca HİÇBİR ŞEY
+                    # görünmüyor ve "çöktü mü?" sorusu cevapsız kalıyor.
+                    # Ayrı akışa basınca stdout dosyaya giderken bu canlı kalır.
+                    if args.ilerleme and genel_uretilen % args.ilerleme == 0:
+                        gecen_dk = (time.time() - baslangic) / 60
+                        hiz = genel_uretilen / gecen_dk if gecen_dk else 0
+                        print(f"[ilerleme] {genel_uretilen} kayit | {gecen_dk:.0f} dk | "
+                              f"{hiz:.0f} kayit/dk | retry {genel_retry}",
+                              file=sys.stderr, flush=True)
 
             gecen = time.time() - dilim_basi
             print(f"    [dilim {dilim_no}/{len(dilimler)}] {len(dilim)} fatura işlendi ({gecen:.0f} sn), toplam üretilen: {genel_uretilen}")
