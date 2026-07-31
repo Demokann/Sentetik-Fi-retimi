@@ -66,7 +66,7 @@ MODEL_PROFILLERI: dict[str, dict] = {
 # NEDEN: qwen3:8b pilotunda retry %31-40, kalan ihlal %16 ve kusurların türü
 # (cümle ortasında kesik, bozuk dilbilgisi, "kategori adını kullanma"ya
 # uymama) MODEL KAPASİTESİ eksenindeydi -- prompt yamasıyla çözülmüyordu
-# (docs/faz-b-prompt.md §15, "B yolu: daha güçlü modele taşı").
+# (docs/arsiv/faz-b-prompt.md §15, "B yolu: daha güçlü modele taşı").
 #
 # TASARIM: mevcut `ollama_cagir` gövdesine DOKUNULMADI. Sağlayıcı modül
 # düzeyinde bir kez ayarlanır (`saglayici_ayarla`), `ollama_cagir` başında
@@ -997,7 +997,7 @@ def persona_uret() -> dict:
 # BİZİM kontrolümüze alır (model uydurmasına değil).
 #
 # Departman personadan TÜRETİLİR, bağımsız rastgele slot DEĞİL: 'satış temsilcisi' +
-# 'Ar-Ge departmanı' çelişkisi 8B'de karakteri bozar (bkz. çelişki yasağı, docs/faz-b-prompt.md §6).
+# 'Ar-Ge departmanı' çelişkisi 8B'de karakteri bozar (bkz. çelişki yasağı, docs/arsiv/faz-b-prompt.md §6).
 ROL_DEPARTMAN = {
     "satış temsilcisi":        "Satış",
     "yazılım mühendisi":       "Ar-Ge",
@@ -1313,7 +1313,7 @@ ZORUNLULUK_GEREKCE: dict[str, list[str]] = {
 #
 # KRİTİK KISIT (kullanıcının kendi tespiti, doğru): yalnız ANOMALİLİ faturada ve
 # yalnız çalışanın FARKINDA olabileceği türlerde açılır. Temiz faturada gerçek bir
-# mağduriyet `manipulatif` sayılırsa `onay_durumu` (docs/etiketler.md §13) haksız
+# mağduriyet `manipulatif` sayılırsa `onay_durumu` (docs/04-etiketler.md §13) haksız
 # 'red' verir -- etiketi gürültüye çevirirdi.
 MAGDURIYET_TURLERI = {"limit_asimi", "yasakli_kategori", "mukerrer_fis_yukleme"}
 
@@ -1728,7 +1728,7 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
         # PEMBE FİL DÜZELTMESİ (2026-07-30): burada eskiden kategori adı
         # GÖSTERİLİP yasaklanıyordu ("Kategori adını ('ofis mobilya') olduğu gibi
         # yazma") -- yasaklanan ifadeyi adıyla anmak onu ÜRETTİRİYOR
-        # (docs/faz-b-prompt.md §6, ölçülmüş). Yön artık POZİTİF: yasak dize hiç
+        # (docs/arsiv/faz-b-prompt.md §6, ölçülmüş). Yön artık POZİTİF: yasak dize hiç
         # gösterilmez, yerine günlük dildeki genel ad ÖNERİLİR.
         #
         # COLLAPSE RİSKİ DÜŞÜNÜLDÜ: genel ad SABİT bir kalıp değil, faturanın
@@ -1921,7 +1921,7 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
             # tekrarlama" yazıyordu. Yasaklanan ifadeyi ADIYLA anmak tam tersini yaptı:
             # qwen3 pilotunda 8 ai_uretimi çıktısının 4'ü tam o ifadeyle BAŞLADI, 2'si daha
             # içinde geçirdi (havuzda 20 açılış var, beklenen ~0,4). Kural artık yalnız
-            # HEDEFLENEN davranışı söylüyor (docs/faz-b-prompt.md §6 pozitif çerçeveleme).
+            # HEDEFLENEN davranışı söylüyor (docs/arsiv/faz-b-prompt.md §6 pozitif çerçeveleme).
             f"Cümleye '{acilis}' gibi bir açılışla başla ve '...{kapanis}' ifadesiyle bitir; verilen açılış/"
             f"kapanışı AYNEN KULLAN, kendi kalıbını uydurma. Kısa tek cümle de olur, resmi "
             # Çekimli firma adı ai_uretimi'ye de verilir: firma_ek_hatasi kuralı üç
@@ -2281,7 +2281,7 @@ DUZELTME_NOTLARI = {
         "harcamayı gereğinden fazla haklı çıkar."
     ),
     # PEMBE FİL: bu notta ısrar kelimelerini ÖRNEKLEYEREK sayma. Ölçüldü
-    # (docs/faz-b-prompt.md §6): yasaklanan ifadeyi adıyla anmak onu ÜRETTİRİYOR --
+    # (docs/arsiv/faz-b-prompt.md §6): yasaklanan ifadeyi adıyla anmak onu ÜRETTİRİYOR --
     # "'Belirtilen fiş' kalıbını tekrarlama" denince 8 çıktının 4'ü tam o ifadeyle
     # başlamıştı. Kural bu yüzden SAYI üzerinden ve POZİTİF kurulur.
     "vurgu_fazlasi": (
@@ -2290,7 +2290,7 @@ DUZELTME_NOTLARI = {
         "ısrarını cümlede TEK BİR yerde bırak, geri kalanı sakin ve kurumsal olsun."
     ),
     # PEMBE FİL: fişte olmayan temayı ADIYLA anma ("çerezden bahsetme" deme),
-    # yoksa model tam onu yazar (docs/faz-b-prompt.md §6). Yön POZİTİF verilir.
+    # yoksa model tam onu yazar (docs/arsiv/faz-b-prompt.md §6). Yön POZİTİF verilir.
     "tema_halusinasyonu": (
         "ÖNEMLİ DÜZELTME: Az önceki cevabın fişte olmayan bir harcamadan söz etti. "
         "Kısa ve muğlak kalman SORUN DEĞİL -- istenen bu. Ama bahsettiğin şey fişteki "
@@ -2313,7 +2313,7 @@ DUZELTME_NOTLARI = {
     ),
     # PEMBE FİL (2026-07-30): bu not eskiden ÜÇ kategori adını örnekliyordu
     # ('kisisel_bakim', 'yemek hizmeti', 'teknoloji ekipman') -- hem de retry'da,
-    # yani modelin en çok tutunduğu yerde. docs/durum-2026-07-29.md
+    # yani modelin en çok tutunduğu yerde. docs/arsiv/durum-2026-07-29.md
     # "enum_sizinti'nin bir kısmı bizim eserimiz" derken kaynağı prompt talimatı
     # sanıyordu; asıl kaynak büyük olasılıkla buydu. Yasak dizeler kaldırıldı,
     # POZİTİF yön (ürünün kendi adı) korundu -- o kısım zaten doğruydu.
@@ -3045,7 +3045,7 @@ def _tek_fatura_vs(fatura, etiket, model, host, keep_alive, kategori,
 #    çözülmeli (bkz. aciklama_birlestir.aciklama_haritasi_kur docstring'i).
 #
 # NEDEN AYRI: `ihlalleri_bul`'a yeni kural eklemek retry tetikler; ölçüldü
-# (docs/faz-b-prompt.md §15), her ek kural retry oranını yükseltip çeşitliliği
+# (docs/arsiv/faz-b-prompt.md §15), her ek kural retry oranını yükseltip çeşitliliği
 # düşürüyor ve 20k'da her 10 puan retry ≈ +8 saat. Buradaki kontroller ise
 # üretimden SONRA çalışır: düzeltmeye çalışmaz, kaydı veri setinden ELER.
 # Maliyeti sıfırdır (tek regex), riski de sıfırdır (prompt/retry davranışı

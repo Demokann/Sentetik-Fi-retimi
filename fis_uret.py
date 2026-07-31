@@ -1,7 +1,7 @@
 """Fatura JSON'larindan GÖRSEL fiş (receipt) render'lari üretir.
 
 Veri boru hattinin parçasi DEĞİLDİR; fişin kendisini üreten ayri araçtir
-(bkz. docs/faz_a_fatura_uretimi.md).
+(bkz. docs/arsiv/faz_a_fatura_uretimi.md).
 
 GÖSTERİM ARİTMETİĞİ (2026-07-31) -- fişin kendi içinde tutarli olmasi ŞART:
 

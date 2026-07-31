@@ -23,6 +23,8 @@ deneme2.md
 deneme2.jsonl
 pilot_set_hazirla.py
 docs/*
+# ...ama diyagramlar README'de kullanılıyor, onlar repoya girsin
+!docs/diagrams/
 whaatif.py
 deneme_80.md
 #aciklama dosyalarını ignore et

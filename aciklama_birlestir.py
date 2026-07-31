@@ -42,7 +42,7 @@ def aciklama_haritasi_kur(dizin: Path, eleme: bool = False) -> tuple[dict[str, s
     dengesini de bozuyor. Ölçüm: enum dahil %16 eleme, hariç %3.
 
     Prompt'a kural eklemek yerine burada elemenin gerekçesi: yeni prompt
-    kuralı retry maliyeti ve çeşitlilik kaybı getiriyor (docs/faz-b-prompt.md
+    kuralı retry maliyeti ve çeşitlilik kaybı getiriyor (docs/arsiv/faz-b-prompt.md
     §15), eleme ise sıfır maliyetli ve geri alınabilir. Silinen kayıt = o
     faturanın açıklaması YOK demektir; `--sadece-uretilenler` ile birlikte
     kullanıldığında fatura da nihai veri setine girmez."""
