@@ -6,6 +6,7 @@ __pycache__/
 .DS_Store
 deneme.py
 
+kaggle_v8_yukleme.zip
 aciklama_claude.py
 aciklama_gemini.py
 firma_adlari_cikar.py
