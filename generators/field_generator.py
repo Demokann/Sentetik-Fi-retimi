@@ -4,8 +4,31 @@ from decimal import Decimal
 from faker import Faker
 from datetime import date, timedelta
 from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu, FirmaTuru, KDV_ORANI_MAP
-import re, math
+import re, math, unicodedata
 from pathlib import Path
+
+
+def _birlesen_nokta_temizle(metin: str) -> str:
+    """'Akdemi̇r' -> 'Akdemir', 'Polo Si̇lver' -> 'Polo Silver'.
+
+    IKI KAYNAKTAN geliyor ve ikisi de fise/prompt'a sizdi (2026-07-30'da olculdu):
+      1. Soyisim listesi 'İ'yi AYRISMIS tutuyor ('i' + U+0307) -> TUM_SOYISIMLER'in
+         %21'i. Sentetik firma adlari registry'de danismanlik %76 / lojistik %83
+         paya sahip oldugu icin fis satici adlarina genis olcude yansiyordu.
+      2. Market CSV yukleyicilerindeki `.title()` -- Python 'İ'yi kucultunce
+         'i' + U+0307 uretiyor. Kalem adlarinin %4-20'si bozuktu:
+         ofis_sarf_malzeme %20,3 | temizlik %9,4 | tutun %8,6 | temel_gida %4,3
+         ('Polo Si̇lver', 'Danone Danette 2'Li̇m', 'Hd Altin Yaprak Si̇gara').
+
+    Ekranda 'i' ile AYNI gorunur, o yuzden gozle fark edilmiyor; ayri bir kod
+    noktasi oldugu icin modele oyle gidiyor. NFC mesru 'İ'yi (U+0130) geri
+    birlestirir, kucuk 'i'de birlesecek karakter olmadigi icin nokta silinir --
+    yani bu donusum 'İstanbul'u BOZMAZ, yalnizca bozuk olani duzeltir.
+
+    NOT: fonksiyon dosyanin BASINDA tanimli olmali -- market yukleyicileri modul
+    yuklenirken (asagida) cagriliyor ve bunu kullaniyor.
+    """
+    return unicodedata.normalize("NFC", metin).replace("̇", "")
 
 fake = Faker("tr_TR")
 SOYISIM_SQL_DOSYASI = Path(__file__).parent.parent / "data" / "soyisimler.sql"
@@ -54,8 +77,115 @@ def market_urunleri_yukle(dosya_yolu: Path = MARKET_URUNLERI_CSV) -> dict[Harcam
                 continue
             isim = (satir.get("ITEMNAME") or "").strip()
             if isim:
-                havuzlar.setdefault(hedef_kategori, []).append(isim.title())
+                havuzlar.setdefault(hedef_kategori, []).append(_birlesen_nokta_temizle(isim.title()))
     return havuzlar
+
+
+def market_ek_kategoriler_yukle(
+    dosya_yolu: Path = MARKET_URUNLERI_CSV,
+) -> tuple[dict[HarcamaKategorisi, list[str]], list[str]]:
+    """market_urunleri.csv'nin ESLENMEYEN kategorilerinden geri kazanilanlar.
+
+    Doner: (havuzlar, sigara_adlari)
+      - havuzlar: TUTUN_URUNLERI (SİGARA, tamami) + TEMIZLIK/OFIS_SARF_MALZEME
+        (KAĞIT/EV, beyaz liste suzgeciyle)
+      - sigara_adlari: makullik haritasina `market` olarak islenecek adlar
+        (§16 politika/satici eksen ayrimi -- markette sigara satici acisindan
+        OLAGANDIR, yalniz politika ihlalidir; bu liste olmadan 19 bin kalem
+        `is_kolu_kategori_uyumsuzlugu`'nu da yanlisligla tetiklerdi).
+    Dosya yoksa bos doner (mevcut davranis korunur).
+    """
+    import csv as _csv
+    if not dosya_yolu.exists():
+        _csv_yok_uyar(dosya_yolu, "market ek kategorileri (SİGARA/KAĞIT/EV)")
+        return {}, []
+    beyaz = {k: [(kat, re.compile(d, re.IGNORECASE)) for kat, d in eslemeler]
+             for k, eslemeler in MARKET_SARF_BEYAZ_LISTE.items()}
+    kara = re.compile(MARKET_SARF_KARA_LISTE, re.IGNORECASE)
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    sigaralar: list[str] = []
+    with open(dosya_yolu, "r", encoding="utf-8-sig") as f:
+        for satir in _csv.DictReader(f):
+            kategori_str = (satir.get("CATEGORY_NAME1") or "").strip().upper()
+            isim = (satir.get("ITEMNAME") or "").strip()
+            if not isim:
+                continue
+            baslikli = _birlesen_nokta_temizle(isim.title())
+            yasakli = MARKET_YASAKLI_ESLESTIRME.get(kategori_str)
+            if yasakli is not None:
+                havuzlar.setdefault(yasakli, []).append(baslikli)
+                sigaralar.append(baslikli)
+                continue
+            eslemeler = beyaz.get(kategori_str)
+            if not eslemeler or kara.search(isim):
+                continue
+            for hedef, desen in eslemeler:     # ilk eslesen kazanir
+                if desen.search(isim):
+                    havuzlar.setdefault(hedef, []).append(baslikli)
+                    break
+    return havuzlar, sigaralar
+
+# market_urunleri.csv'nin ESLENMEYEN kategorileri (2026-07-30'da olculdu):
+#   SİGARA 19.031 | KAĞIT 21.577 | EV 12.816 | BEBEK 6.382 | PET 33
+# BEBEK/PET dogru sekilde dusuruluyor. Diger ucu asagida geri kazaniliyor.
+#
+# SİGARA -> TUTUN_URUNLERI (yasakli kategori). Kazanc GERCEKCILIK: elle yazilmis
+# tutun havuzu 18 kalemdi ve "Sigara", "Ithal Sigara" gibi jenerik adlardan
+# olusuyordu. CSV ise gercek marka adi veriyor: 'MONTE CARLO SLENDER BLUE',
+# 'WINSTON KISA BOX', 'PARLIAMENT UZUN NIGHT BLUE'. Fiste marka gorunmesi hem
+# gorsel fis hem Faz B aciklamasi icin daha inandirici.
+# NOT: CSV'de ALKOL YOK (tarandi: bira/raki/sarap/votka anahtar kelimeleriyle 0
+# eslesme) -> alkol `anomali_urunler.csv`'den gelmeye DEVAM eder.
+MARKET_YASAKLI_ESLESTIRME = {
+    "SİGARA": HarcamaKategorisi.TUTUN_URUNLERI,
+}
+
+# KAĞIT ve EV: buyuk kismi gercekten KURUMSAL sarf malzemesi ('F Saff Havlu
+# Kagidi', 'Teno 100 Adet Pecete', 'Cook Cop Torbasi', 'Piknik Plastik Eldiven',
+# 'Duracell 4'lu Kalem Pil') ama icine kisisel/ev urunleri karismis ('Orkid
+# Ultra Comfort Gece' = ped, 'Sayan Dikissiz Corap', 'Cakmak Mutfak'). O yuzden
+# TOPTAN alinmaz, BEYAZ LISTE ile alinir -- urun_kurumsal_filtre.py'nin
+# yaklasimi (§17.1): havuz ham B2C oldugunda elemeye calismak yerine kabul
+# edileni saymak gerekiyor.
+#
+# Faz B'ye faydasi: bu adlar temiz_urunler.csv'nin (Trendyol) adlarindan cok
+# daha kolay anlatilir -- 'Havlu Kagidi' vs 'dijiname Dijital Hazir Kartvizit+tag - 21'.
+# CSV kategorisi -> [(hedef kategori, urun deseni), ...]  SIRA ONEMLI, ilk eslesen kazanir.
+#
+# EV KATEGORISI BOLUNDU (2026-07-30, ilk surumun yan etkisi olculdukten sonra):
+# once EV'in tamami OFIS_SARF_MALZEME'ye eslenmisti ve sonuc gercek disi cikti --
+# 1.011 kirtasiye faturasinin en sik kalemleri cop poseti/buzdolabi poseti/kalem
+# pil oldu (olculdu). Ustune firma adi kisiti kirtasiyeciyi zaten yalniz
+# OFIS_SARF_MALZEME'ye daralttigi icin o fisler %100 cop posetine dondu --
+# duzeltmeye calistigim "dijital kartvizit baskinligi"nin daha kotusu.
+# Dogrusu: cop torbasi/poset/eldiven/sunger/strec TESIS-TEMIZLIK malzemesidir,
+# kirtasiye degil. Yalniz pil/bant/yapistirici ofis sarfina aittir.
+MARKET_SARF_BEYAZ_LISTE: dict[str, list[tuple[HarcamaKategorisi, str]]] = {
+    "KAĞIT": [(
+        HarcamaKategorisi.TEMIZLIK,
+        r"havlu ?ka[gğ]|pe[cç]ete|tuvalet ka[gğ]|kagit havlu|ka[gğ][ıi]t havlu"
+        r"|[ıi]slak mendil|mendil|rulo|z ?katlama|dispenser",
+    )],
+    "EV": [
+        (HarcamaKategorisi.TEMIZLIK,
+         r"[cç][oö]p torba|[cç][oö]p po[sş]et|buzdolab[ıi] po[sş]|po[sş]et"
+         r"|eldiven|bula[sş][ıi]k s[uü]nger|s[uü]nger|ovma|bula[sş][ıi]k teli"
+         r"|streç film|al[uü]minyum folyo"),
+    ],
+    # EV -> OFIS_SARF_MALZEME eslemesi (pil/bant) KALDIRILDI: CSV'de ~580 pil
+    # varyanti var ve kuratorlu 34 kirtasiye kalemini bogdu -- olculdu, kirtasiye
+    # fisinin en sik 6 kaleminin ALTISI DA 'Kalem Pil'di. Turk kirtasiyesi pil
+    # satar ama fisin tamami pil olmaz; havuz orani yanlisti. Pil artik
+    # BEBEK/PET gibi dusuruluyor.
+}
+
+# Beyaz listeden gecse bile bunlar KISISEL/EV urunudur, elenir (kara liste ONCE
+# calisir -- §17.1'deki kalibrasyon tuzagi: ayni kelime iki listede olursa urun elenir).
+MARKET_SARF_KARA_LISTE = (
+    r"ped\b|hijyenik|orkid|molped|tampon|bebek bezi|[cç]ocuk bezi|prezervatif"
+    r"|[cç]orap|iç ?[cç]ama[sş][ıi]r|mutfak\b|kedi|k[oö]pek|oyuncak"
+)
+
 
 #helper method ürün adında gereksiz şeyleri temizler.
 def _urun_kodu_temizle(baslik: str) -> str:
@@ -350,13 +480,48 @@ ACIKLAMA_HAVUZU = {
         "Apart Kiralama",
         "Konaklama Hizmeti",
     ],
+    # KÜRATÖRLÜ ÇEKİRDEK (2026-07-30'da 5 -> 34 kaleme çıkarıldı).
+    # Gerekçe: havuzun CSV tarafı (temiz_urunler.csv) dijital kartvizite,
+    # market EV kategorisi ise pil/banda yığılıyordu. Ölçüldü: firma adı kısıtı
+    # kırtasiyeciyi bu kategoriye daralttığında fişin dört kalemi de kartvizit,
+    # sonra da hepsi 'Kalem Pil' çıkıyordu -- gerçek bir kırtasiye fişi kalem,
+    # kağıt, dosya, klasör, toner içerir. Çekirdek listesi o tabanı verir.
     HarcamaKategorisi.OFIS_SARF_MALZEME: [
-        "Kirtasiye Malzemesi", "Toner/Kartuş", "Yazici Kağidi",
-        "Temizlik Malzemesi", "A4 Kağit Kolisi",
+        "Kirtasiye Malzemesi", "Toner/Kartuş", "Yazici Kağidi", "A4 Kağit Kolisi",
+        "A4 Fotokopi Kağidi (500'lü)", "A3 Fotokopi Kağidi", "Renkli Fotokopi Kağidi",
+        "Tükenmez Kalem (10'lu)", "Kurşun Kalem Kutusu", "Versatil Kalem",
+        "Fosforlu Kalem Seti", "Beyaz Tahta Kalemi", "Permanent Marker",
+        "Silgi", "Kalemtiraş", "Cetvel Seti",
+        "A4 Defter", "Spiralli Defter", "Bloknot", "Yapişkanli Not Kağidi",
+        "Telli Dosya", "Plastik Dosya (50'li)", "Klasör (Genişletilebilir)",
+        "Arşiv Kutusu", "Evrak Zarfi (100'lü)", "Kraft Zarf",
+        "Zimba Makinesi", "Zimba Teli", "Delgeç", "Ataş Kutusu", "Klips Seti",
+        "Yapiştirici Stick", "Koli Bandi", "Şeffaf Bant",
     ],
+    # KÜRATÖRLÜ ÇEKİRDEK LİSTE (2026-07-30'da 5 -> 40 kaleme çıkarıldı).
+    # Gerekçe: bu kategorinin CSV kaynağı (temiz_urunler.csv / Trendyol) özünde EV
+    # mobilyası. §17.1 zaten 4196 -> 248'e budamıştı ama kalanın ~%55'i de ev
+    # ürünüydü ("Buzdolabı İçi Organizer", "Bavul İçi Düzenleyici", "Altın Takı
+    # Standı", "Ağaç Lambader", "Balkon Bahçe Oturma Grubu"). Jenerik beyaz-liste
+    # terimleri (`raf`, `organizer`, `duzenleyici`) bunları geçiriyordu -- §17.1'in
+    # "kalibrasyon tuzağı" notunun `sunum`/`kasa`/`çekmece` için söylediğinin aynısı.
+    # Kara-liste yarışı 249 kalemlik bir havuzda verimsiz; onun yerine GERÇEKTEN
+    # ofis mobilyası olan bir çekirdek yazıldı. CSV'den süzülen kalan kalemler
+    # buna EKLENİR (aşağıdaki birleştirme bloğu), yani çeşitlilik korunur ama
+    # havuzun tamamı artık ev dekorasyonuna teslim değil.
     HarcamaKategorisi.OFIS_MOBILYA: [
-    "Ofis Masasi", "Ofis Sandalyesi", "Kahve Makinesi",
-    "Dolap", "Toplanti Masasi",
+        "Ofis Masasi", "Çalişma Masasi", "Toplanti Masasi", "Makam Masasi",
+        "L Tipi Çalişma Masasi", "Yükseklik Ayarli Çalişma Masasi",
+        "Ofis Sandalyesi", "Ergonomik Ofis Koltuğu", "Yönetici Koltuğu",
+        "Misafir Sandalyesi", "Bekleme Koltuğu", "Toplanti Sandalyesi",
+        "Tabure", "Bar Tabure",
+        "Dosya Dolabi", "Evrak Dolabi", "Kilitli Dolap", "Arşiv Dolabi",
+        "Çekmeceli Keson", "Keson", "Kitaplik", "Etajer", "Dosya Rafi",
+        "Beyaz Tahta", "Yazi Tahtasi", "Duyuru Panosu", "Flipchart",
+        "Projeksiyon Perdesi", "Portmanto", "Askilik", "Şemsiyelik",
+        "Masa Lambasi", "Monitör Standi", "Laptop Standi", "Klavye Altliği",
+        "Evrak Rafi", "Kalemlik", "Masa Üstü Düzenleyici",
+        "Kahve Makinesi", "Su Sebili",
     ],
     HarcamaKategorisi.TEKNOLOJI_EKIPMAN: [
         "Yazici/Tarayici", "Monitör", "Bilgisayar",
@@ -500,6 +665,18 @@ _anomali_urunleri = anomali_urunleri_yukle()
 # anomali_urun_makullugu_yukle docstring'i). validators.py bunu okur.
 ANOMALI_URUN_MAKULLUGU: dict[str, set[str]] = anomali_urun_makullugu_yukle()
 
+# market_urunleri.csv'nin eslenmeyen kategorilerinden geri kazanilanlar
+# (SİGARA -> tutun, KAĞIT/EV -> sarf). Bkz. market_ek_kategoriler_yukle.
+_market_ek, _market_sigaralari = market_ek_kategoriler_yukle()
+
+# SİGARA kalemleri SATICI EKSENINDE market icin MAKULDUR (§16): markette sigara
+# satmak olagandir, sirketin odemesi degildir. Bu kayit olmadan 19 bin kalem
+# `yasakli_kategori` ile birlikte `is_kolu_kategori_uyumsuzlugu`'nu DA tetikler
+# ve iki etiket yeniden %100 korele hale gelirdi -- §16'da kapatilan hatanin
+# aynisi. `bufe`/`tekel` ayri bir IsKolu olmadigi icin karsiligi `market`tir.
+for _sigara in _market_sigaralari:
+    ANOMALI_URUN_MAKULLUGU.setdefault(_sigara, set()).add(IsKolu.MARKET.value)
+
 # ALKOL/EGLENCE/TUTUN_URUNLERI/KUMAR: elle yazilmis sabit listeler sadece
 # 3-4 elemanliydi, CSV çok daha zengin (100'lerce ürün) -- CSV varsa
 # üzerine YAZIYORUZ (append degil), yoksa eski sabit liste fallback olarak kalir.
@@ -512,12 +689,29 @@ for _kategori in (
     _ekstra = _anomali_urunleri.get(_kategori)
     if _ekstra:
         ACIKLAMA_HAVUZU[_kategori] = _ekstra
+    # market_urunleri.csv'den gelen SİGARA kalemleri EKLENIR (uzerine yazilmaz):
+    # elle yazilmis jenerik adlar ('Sarma Tutun (50gr)', 'Nargile') makullik
+    # kolonuyla birlikte kalmali -- onlar market icin makul DEGIL, marka sigarasi
+    # ise makul. Ikisi bir arada varyans uretir (§16'nin istedigi de bu).
+    _ek_yasakli = _market_ek.get(_kategori)
+    if _ek_yasakli:
+        ACIKLAMA_HAVUZU[_kategori] = ACIKLAMA_HAVUZU[_kategori] + _ek_yasakli
 
 # CSV'den geleni ata, boş/yoksa ACIKLAMA_HAVUZU'ndaki (artık zenginleştirilmiş)
 # mevcut genel açıklama listesine düş -- ayrı, alakasız tek satırlık
 # fallback listelerine artık gerek yok.
 for _kategori in (HarcamaKategorisi.GIYIM, HarcamaKategorisi.KISISEL_BAKIM):
     ACIKLAMA_HAVUZU[_kategori] = _temiz_urunler.get(_kategori) or ACIKLAMA_HAVUZU[_kategori]
+
+# KAĞIT -> TEMIZLIK, EV -> OFIS_SARF_MALZEME (beyaz liste suzgeciyle geri
+# kazanilan kurumsal sarf malzemesi; bkz. market_ek_kategoriler_yukle). EKLENIR.
+# ofis_sarf_malzeme havuzu bu eklemeden ONCE 163 kalemdi ve dijital kartvizit
+# varyantlari baskindi -- bir kirtasiye fisinin dort kalemi de kartvizit
+# cikiyordu (olculdu). Gercek sarf malzemesi girmesi onu dengeler.
+for _kategori in (HarcamaKategorisi.TEMIZLIK, HarcamaKategorisi.OFIS_SARF_MALZEME):
+    _ek_sarf = _market_ek.get(_kategori)
+    if _ek_sarf:
+        ACIKLAMA_HAVUZU[_kategori] = ACIKLAMA_HAVUZU[_kategori] + _ek_sarf
 
 # Market CSV'sindeki KOZMETİK/DETERJAN TEMİZLİK satırlarıyla ilgili
 # havuzları zenginleştir (üzerine yazma, ekle).
@@ -538,9 +732,25 @@ if _market_temizlik:
 ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK] = _temiz_urunler.get(HarcamaKategorisi.TEMIZLIK) or ACIKLAMA_HAVUZU[HarcamaKategorisi.TEMIZLIK]
 
 # Supermarket etiketiyle gelen TEMEL_GIDA urunleri (temiz_urunler.csv) —
-# market_urunleri.csv'den AYRI tutuluyor, cunku rastgele_kalem'de ikisi
-# arasinda %60/%40 agirlikli secim yapilacak (cesitlilik icin).
-TEMEL_GIDA_SUPERMARKET_HAVUZU = _temiz_urunler.get(HarcamaKategorisi.TEMEL_GIDA, [])
+# 2026-07-30'da DEVRE DISI BIRAKILDI (bos liste).
+#
+# Havuz 1.753 satirdi, market_urunleri.csv'nin 500.438'i yaninda %0,35 — AMA
+# rastgele_kalem icinde %40 AGIRLIKLA cekiliyordu (TEMEL_GIDA_MARKET_AGIRLIGI).
+# Yani fisteki gida kalemlerinin ~%40'i bu kucuk havuzdan geliyordu ve icerigi
+# kurumsal bir markette bulunmayacak B2C artiklariydi: 'Petimix Dana Girtlak
+# Cigneme Kemikleri' (kopek maması), 'Fare Kovucu Ultrasonic', 'Bambala Pancar
+# Corbasi +6 Ay' (bebek mamasi), 'Tupperware Shaker', 'Masaj Yastigi Aleti'.
+# Faz B'de "Babyjem bebek seti" tipi aciklamalarin kaynagi buydu (§17, kalitenin
+# tavani fis gercekciligi).
+#
+# market_urunleri.csv gercek bir market listesi (Havuc, Sutas Yayik Tereyag,
+# Sivri Biber, Coca Cola) ve TEMIZLIK'i de kapsiyor (22.748) -> kurumsal filtreye
+# ihtiyaci yok, tek basina yeterli. Cesitlilik gerekcesi de gecerliligini
+# yitiriyor: 500 bin satirlik havuzda cesitlilik sorunu yok.
+#
+# GERI ALMAK ISTERSEN: temiz_urunler.csv'nin Supermarket satirlarini once
+# urun_kurumsal_filtre.py'den gecir, yoksa ayni artiklar %40 agirlikla geri gelir.
+TEMEL_GIDA_SUPERMARKET_HAVUZU: list[str] = []
 
 # ACIKLAMA_HAVUZU[TEMEL_GIDA]: sadece uzunluk hesaplari (rastgele_fatura
 # icindeki toplam_musait_aciklama) icin birlesik liste olarak tutuluyor;
@@ -686,26 +896,29 @@ SEKTOR_KELIME_HAVUZU = {
 """
 
 NITELIK_KELIME_HAVUZU = [
-    "Modern", "Global", "Anadolu", "Ege", "Merkez", "Yildiz",
+    "Modern", "Global", "Anadolu", "Ege", "Merkez", "Yıldız",
     "Başkent", "Marmara", "Kardeş", "Öncü", "Doğa", "Vizyon",
     "Akdeniz", "Karadeniz", "Toros", "Zirve", "Ufuk", "Bereket",
-    "Değer", "Fener", "Umut", "Bariş", "Güven", "Sinir",
-    "Doruk", "Ata", "Yeni", "Bati", "Doğu", "Kuzey",
+    # 2026-07-30 yazim düzeltmesi: Yildiz->Yıldız, Bariş->Barış, Bati->Batı ve
+    # Sinir->SINIR. Son dördü yalnız diakritik değil ANLAM hatasıydı: "sinir"
+    # (nerve) yerine "sınır" (border) -- lojistik firmasında kastedilen budur.
+    "Değer", "Fener", "Umut", "Barış", "Güven", "Sınır",
+    "Doruk", "Ata", "Yeni", "Batı", "Doğu", "Kuzey",
 ]
 
 
 IS_KOLU_SEKTOR_KELIME = {
     IsKolu.RESTORAN: ["Sofra", "Lezzet", "Mutfak"],
-    IsKolu.MARKET: ["Market", "Gida Pazarlama", "Tarim"],
+    IsKolu.MARKET: ["Market", "Gıda Pazarlama", "Tarım"],
     IsKolu.OTEL: ["Grand", "Otel", "Resort"],
-    IsKolu.OFIS_TEDARIK: ["Kirtasiye", "Ofis Sarf", "Büro Malzemeleri"],
-    IsKolu.TEKNOLOJI: ["Yazilim", "Teknoloji", "Bilişim"],
-    IsKolu.DANISMANLIK_FIRMASI: ["Danişmanlik", "Consulting", "Denetim"],
+    IsKolu.OFIS_TEDARIK: ["Kırtasiye", "Ofis Sarf", "Büro Malzemeleri"],
+    IsKolu.TEKNOLOJI: ["Yazılım", "Teknoloji", "Bilişim"],
+    IsKolu.DANISMANLIK_FIRMASI: ["Danışmanlık", "Consulting", "Denetim"],
     IsKolu.LOJISTIK_FIRMASI: ["Lojistik", "Nakliyat", "Kargo"],
     # Ulaşım sektör kelimeleri hizmete ÖZEL (Taksi/Akaryakit/Rent A Car) ya da
     # JENERİK (Turizm/Seyahat/Ulaşım). Özel olanlar yalnız fişte ilgili kalem varsa
     # firma adına girer (bkz. SEKTOR_KELIME_KALEM_KOSULU); jenerikler her zaman uygun.
-    IsKolu.ULASIM_SAGLAYICI: ["Taksi", "Otogar", "Akaryakit", "Rent A Car",
+    IsKolu.ULASIM_SAGLAYICI: ["Taksi", "Otogar", "Akaryakıt", "Rent A Car",
                               "Turizm", "Seyahat", "Ulaşım"],
     IsKolu.ORGANIZASYON: ["Organizasyon", "Etkinlik", "Prodüksiyon"],
     IsKolu.GIYIM_MAGAZASI: ["Tekstil", "Giyim", "Moda"],   # yeni
@@ -717,7 +930,11 @@ IS_KOLU_SEKTOR_KELIME = {
 # Burada OLMAYAN sektör kelimeleri jeneriktir, her zaman uygundur.
 SEKTOR_KELIME_KALEM_KOSULU = {
     "Taksi": ("taksi",),
-    "Akaryakit": ("akaryakit", "yakit", "benzin", "motorin"),
+    # ANAHTAR, IS_KOLU_SEKTOR_KELIME'deki yazımla BİREBİR aynı olmalı (sözlük
+    # lookup'ı diakritiğe duyarlı). 2026-07-30'da "Akaryakit" -> "Akaryakıt"
+    # düzeltildi; anahtar da birlikte değişti, yoksa koşul sessizce devre dışı
+    # kalıp yakıt kelimesi ilgisiz firmalara girerdi.
+    "Akaryakıt": ("akaryakit", "yakit", "benzin", "motorin"),
     "Rent A Car": ("arac kiralama", "rent a car", "kiralama"),
     "Otogar": ("otobus", "otogar", "sehirlerarasi"),
 }
@@ -760,6 +977,122 @@ MUTFAK_KISITLARI: list[tuple[str, set[str]]] = [
 ]
 
 YEMEK_MENU_BOLUMLERI: dict[str, list[str]] = yemek_urunleri_bolumlu_yukle()
+
+
+# ---------------------------------------------------------------------------
+# FIRMA ADI KISITI -- MUTFAK_KISITLARI'nin restoran DISI is kollarina genellemesi
+# (2026-07-30). Problem ayni: firma adi is_kolu'ndan DAHA DAR bir urun yelpazesi
+# isaret ediyor, ama kalem secimi ada bakmiyordu. Olculen sonuclar (Faz B pilotu):
+# 'Kuruyemis'ten chia tohumu + camasir yumusaticisi', 'Kirtasiye'den ofis masasi'.
+#
+# MUTFAK_KISITLARI'ndan YAPISAL FARK: restoran CSV'sinde menu BOLUMU kolonu var,
+# daraltma bolum secerek yapiliyor. Market/ofis/teknoloji havuzlari duz urun adi
+# listesi -> daraltma iki ayri kaldiracla yapilir:
+#   (1) KATEGORI daralt  : kirtasiyeci OFIS_MOBILYA satmaz  -> izinli kategori kumesi
+#   (2) URUN ADI daralt  : kuruyemisci her gidayi satmaz    -> urun adi deseni
+# Ucuncu eleman None ise yalniz (1) uygulanir.
+#
+# SIRA ONEMLI: ilk eslesen kazanir (MUTFAK_KISITLARI ile ayni sozlesme).
+#
+# `tekel` NOTU: gercek bir tekel alkol/tutun satar ama bunlar POLICY_YASAKLI
+# kategorilerdir ve MARKET'in izinli kategorilerinde YOKTUR. Temiz uretimde
+# alkol/sigara CIKARMAK anomali uretmek olurdu (§12: kisit yalniz TEMIZ uretime
+# girer, anomaliyi enjektorler uretir). Bu yuzden tekel, bufe gibi ele alinir:
+# icecek + paketli atistirmalik.
+FIRMA_ADI_KISITLARI: dict[IsKolu, list[tuple[str, set[HarcamaKategorisi], str | None]]] = {
+    IsKolu.MARKET: [
+        (r"kuruyemis|kuru yemis|cerezci|cerez",
+         {HarcamaKategorisi.TEMEL_GIDA},
+         r"f[ıi]st[ıi]k|badem|ceviz|f[ıi]nd[ıi]k|leblebi|kaju|antep|kuruyemis"
+         r"|kuru ?[uü]z[uü]m|kay[ıi]s[ıi]|incir|[cç]ekirdek|kavrulmu|cerez|[cç]erez"),
+        (r"sarkuteri|sarkuteri|kasap|et ?urunleri",
+         {HarcamaKategorisi.TEMEL_GIDA},
+         r"salam|sucuk|sosis|past[ıi]rma|kavurma|jambon|[sş]ar[kc]uteri|ka[sş]ar"
+         r"|peynir|terey[aa][gğ]|kiyma|k[ıi]yma|but|kanat|bonfile|dana|kuzu|tavuk"),
+        (r"bufe|tekel|kiosk",
+         {HarcamaKategorisi.TEMEL_GIDA},
+         r"gazoz|kola|cola|soda|ayran|maden suyu|cips|[cç]ikolata|sak[ıi]z|gofret"
+         r"|kraker|bisk[uü]vi|enerji i[cç]ece|meyve suyu|ice tea|kahve|[cç]ay"),
+    ],
+    IsKolu.OFIS_TEDARIK: [
+        # Mobilyaci kirtasiye satmaz, kirtasiyeci ofis masasi satmaz. En temiz
+        # ayrim burada (osm adlarinin %41'i bu iki kelimeden birini tasiyor).
+        (r"mobilya|koltuk|masa ?sandalye", {HarcamaKategorisi.OFIS_MOBILYA}, None),
+        (r"kirtasiye|kitap|copy|fotokopi",
+         {HarcamaKategorisi.OFIS_SARF_MALZEME}, None),
+    ],
+    IsKolu.TEKNOLOJI: [
+        (r"bilgisayar|computer|elektronik|teknoloji marketi",
+         {HarcamaKategorisi.TEKNOLOJI_EKIPMAN}, None),
+        (r"bilisim|yazilim|software|dijital",
+         {HarcamaKategorisi.YAZILIM_LISANS, HarcamaKategorisi.TEKNOLOJI_EKIPMAN}, None),
+    ],
+}
+
+# Urun adi daraltmasi sonucu havuz bundan kucuk kalirsa daraltma UYGULANMAZ
+# (kategori kisiti yine gecerlidir). Gerekce: 6 urunluk bir alt havuz o firmalarin
+# fislerini birbirinin kopyasi yapar ve firma adini kalemden TAHMIN EDILEBILIR
+# kilar -- ezberlenebilir kisayol, yani leakage. Olculdu: giyim tarafinda esarp 6,
+# triko 13 urun; market tarafinda alt havuzlar 25-75 bin, sorunsuz.
+ASGARI_ALT_HAVUZ = 50
+
+
+# Dar havuz ONBELLEGI (is_kolu, desen) -> (izinli kategoriler, dar havuzlar).
+# ZORUNLU, kozmetik degil: onbelleksiz surumde her eslesen faturada dar havuz
+# SIFIRDAN hesaplaniyordu ve TEMEL_GIDA havuzu 500.438 kalem -- 120k uretimde
+# ~3.000 kisitli market faturasi x 500k regex = ~1,5 milyar islem, uretim
+# gozle gorulur sekilde yavasladi. Havuzlar ve desenler modul yuklendikten
+# sonra SABIT oldugu icin sonuc deterministik, onbellege alinmasi guvenli.
+_KISIT_ONBELLEK: dict[tuple[IsKolu, str], tuple[list[HarcamaKategorisi], dict[HarcamaKategorisi, list[str]]] | None] = {}
+
+
+def firma_adi_kisiti_sec(
+    is_kolu: IsKolu, satici_unvan: str
+) -> tuple[list[HarcamaKategorisi], dict[HarcamaKategorisi, list[str]]] | None:
+    """Firma adi is_kolu'ndan daha dar bir yelpaze isaret ediyorsa (izinli
+    kategoriler, daraltilmis havuzlar) ikilisini doner; eslesme yoksa None
+    (kisit uygulanmaz, mevcut davranis korunur).
+
+    Ad -> DESEN eslesmesi her cagrida yapilir (ucuz, en fazla 3 regex); desen ->
+    dar havuz hesabi ONBELLEKTEN gelir (bkz. _KISIT_ONBELLEK)."""
+    anahtar_desen = firma_kisit_anahtari(is_kolu, satici_unvan)
+    if anahtar_desen is None:
+        return None
+    onbellek_anahtari = (is_kolu, anahtar_desen)
+    if onbellek_anahtari in _KISIT_ONBELLEK:
+        return _KISIT_ONBELLEK[onbellek_anahtari]
+
+    kategoriler, urun_deseni = next(
+        (kat, ud) for d, kat, ud in FIRMA_ADI_KISITLARI[is_kolu] if d == anahtar_desen
+    )
+    izinli = [k for k in IS_KOLU_KATEGORILERI[is_kolu] if k in kategoriler]
+    if not izinli:          # kisit is_kolu ile celisiyorsa yok say
+        _KISIT_ONBELLEK[onbellek_anahtari] = None
+        return None
+    havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    if urun_deseni:
+        r = re.compile(urun_deseni, re.IGNORECASE)
+        for kat in izinli:
+            alt = [u for u in ACIKLAMA_HAVUZU[kat] if r.search(u)]
+            if len(alt) >= ASGARI_ALT_HAVUZ:
+                havuzlar[kat] = alt
+    sonuc = (izinli, havuzlar)
+    _KISIT_ONBELLEK[onbellek_anahtari] = sonuc
+    return sonuc
+
+
+def firma_kisit_anahtari(is_kolu: IsKolu, satici_unvan: str) -> str | None:
+    """Firma adi kisitinin KIMLIGI (eslesen desen). mutfak_anahtari ile ayni
+    amac: fatura_no_tekrari cifti AYNI kisittan secilmeli, yoksa f2 devraldigi
+    unvan ile kendi kalemleri celisir ('Kirtasiye' adi + ofis masasi kalemi)."""
+    kisitlar = FIRMA_ADI_KISITLARI.get(is_kolu)
+    if not kisitlar:
+        return None
+    ad = _ascii_kucuk(satici_unvan)
+    for desen, _, _ in kisitlar:
+        if re.search(desen, ad):
+            return desen
+    return None
 
 
 def mutfak_anahtari(satici_unvan: str) -> str | None:
@@ -814,22 +1147,25 @@ def _sektor_kelime_sec(is_kolu: IsKolu, kalemler=None) -> str:
 """SUFFIX_HAVUZU = ["Ltd. Şti.", "A.Ş.", "Tic. Ltd. Şti."] """
 
 IS_KOLU_SUFFIX = {
-    IsKolu.RESTORAN: ["Gida San. ve Tic. Ltd. Şti.", "Ltd. Şti."],
-    IsKolu.MARKET: ["Gida Paz. Tic. Ltd. Şti.", "Tic. A.Ş."],
+    IsKolu.RESTORAN: ["Gıda San. ve Tic. Ltd. Şti.", "Ltd. Şti."],
+    IsKolu.MARKET: ["Gıda Paz. Tic. Ltd. Şti.", "Tic. A.Ş."],
     IsKolu.OTEL: ["Turizm A.Ş.", "Otelcilik Ltd. Şti."],
     IsKolu.TEKNOLOJI: ["A.Ş.", "Ltd. Şti."],
-    IsKolu.DANISMANLIK_FIRMASI: ["Danişmanlik A.Ş.", "Ltd. Şti."],
+    IsKolu.DANISMANLIK_FIRMASI: ["Danışmanlık A.Ş.", "Ltd. Şti."],
     IsKolu.LOJISTIK_FIRMASI: ["A.Ş.", "Nak. Tic. Ltd. Şti."],
     IsKolu.ULASIM_SAGLAYICI: ["Ltd. Şti.", "Turizm Taş. Ltd. Şti."],
     IsKolu.OFIS_TEDARIK: ["Tic. Ltd. Şti.", "A.Ş."],
-    IsKolu.ORGANIZASYON: ["Ltd. Şti.", "Prodüksiyon A.Ş."],
+    # NOT: bu anahtar eskiden İKİ KEZ yazılmıştı (ikincisi birincisini sessizce
+    # eziyordu); değerler aynı olduğu için etkisizdi, kopyala-yapıştır artığı silindi.
     IsKolu.ORGANIZASYON: ["Ltd. Şti.", "Prodüksiyon A.Ş."],
     IsKolu.GIYIM_MAGAZASI: ["Tekstil Tic. Ltd. Şti.", "Konfeksiyon A.Ş."],   # yeni
     IsKolu.KISISEL_BAKIM: ["Kozmetik Tic. Ltd. Şti.", "A.Ş."],
 }
 
 # Uzun unvan varyasyonlari için ek kelime havuzu
-UZUN_UNVAN_EKLERI = ["Global", "İç ve Diş Ticaret", "Sanayi ve Ticaret"]
+# "Diş" -> "Dış" (2026-07-30): anlam hatasiydi, 'İç ve Dış Ticaret' (domestic &
+# foreign trade) kastediliyor; 'Diş' = tooth. Sinir->Sınır ile ayni sinif.
+UZUN_UNVAN_EKLERI = ["Global", "İç ve Dış Ticaret", "Sanayi ve Ticaret"]
 
 FIRMA_TURU_AGIRLIK = {
     FirmaTuru.KISA_UNVAN: 55,
@@ -855,7 +1191,8 @@ def soyisimleri_yukle() -> list[str]:
     return bulunanlar
 
 
-TUM_SOYISIMLER = soyisimleri_yukle()   # modül yüklenince bir kere okunur
+# modül yüklenince bir kere okunur; birleşen nokta yüklemede temizlenir
+TUM_SOYISIMLER = [_birlesen_nokta_temizle(s) for s in soyisimleri_yukle()]
 
 
 def rastgele_soyisim() -> str:
@@ -940,6 +1277,27 @@ SAHIS_TICARI_UNVAN = {
 }
 
 
+def _ayni_kelimeyi_tasiyor(a: str, b: str) -> bool:
+    """İki unvan parçası ORTAK bir anlamlı kelime taşıyor mu (diakritik/büyük-küçük
+    duyarsız). Hukuki kısaltmalar ('A.Ş.', 'Tic.', 've') ortak sayılmaz -- onlar
+    her suffix'te bulunur, sayılsa hiçbir aday kalmazdı."""
+    _yoksay = {"a.ş.", "as", "ltd.", "şti.", "sti", "tic.", "tic", "san.", "san",
+               "ve", "paz.", "paz", "nak.", "nak", "taş.", "tas"}
+    def _kelimeler(m: str) -> set[str]:
+        return {_ascii_kucuk(k) for k in m.split()
+                if _ascii_kucuk(k) not in _yoksay and len(k) > 2}
+    return bool(_kelimeler(a) & _kelimeler(b))
+
+
+# Faker'ın tr_TR ad havuzunda BOZUK KARAKTERLİ girdiler var: 'N˜zamett˜n'
+# (Nizamettin) -- '˜' Latin-1 aralığında olduğu için `latin_disi_mi` süzgeci
+# yakalamıyor. Ölçüldü (registry 28.882): 7 firma, hepsi kaynak=sahis. Fişte
+# satıcı adı olarak göründüğünde metne de sızıyordu ("N˜zamett˜n Bilgin Oteli
+# ile yapılan konaklama"). ONARMAK yerine REDDEDİLİR: '˜' -> 'i' eşlemesi
+# tahminden ibaret ve Faker havuzu sınırsız, yeni ad çekmek bedava.
+_BOZUK_AD_KARAKTERI = re.compile(r"[˜¸ˇ˘´¨-]")
+
+
 def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru, kalemler=None) -> str:
     if firma_turu == FirmaTuru.SAHIS_SIRKETI:
         # ŞAHIS ŞİRKETİ = kişi adı + TİCARİ UNVAN (2026-07-29).
@@ -954,14 +1312,49 @@ def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru, kalemler=None) ->
         # Gerçek hayatta şahıs şirketi faturası da bir ticari unvan taşır
         # ('İşcan Gülen Market'). Hukuki ek (A.Ş./Ltd. Şti.) EKLENMEZ -- o
         # tüzel kişiliğe aittir, şahıs şirketinde bulunmaz.
-        kisi = _UNVAN_ONEKLERI.sub("", fake.name()).strip()
+        # Bozuk karakterli ad çıkarsa yenisini çek (bkz. _BOZUK_AD_KARAKTERI).
+        # Sınırlı deneme: havuz tükenmez ama sonsuz döngü de olmasın.
+        for _ in range(10):
+            kisi = _UNVAN_ONEKLERI.sub("", fake.name()).strip()
+            if not _BOZUK_AD_KARAKTERI.search(kisi):
+                break
+        # Faker çok parçalı adlarda aynı soyadı iki kez üretebiliyor ('Duran Duran
+        # Ofis Market', 'Türk Türk Market' -- 13.200 adda 21 kez, %0,16). Fişte
+        # satıcı adı olarak gülünç duruyor; ardışık tekrarı düşür.
+        parcalar: list[str] = []
+        for p in kisi.split():
+            if not parcalar or _ascii_kucuk(p) != _ascii_kucuk(parcalar[-1]):
+                parcalar.append(p)
+        kisi = " ".join(parcalar)
         unvan = random.choice(SAHIS_TICARI_UNVAN[is_kolu])
         return f"{kisi} {unvan}"
 
     # Sektör kelimesi fişteki kalemlerle tutarlı seçilir (ör. 'Taksi' yalnız
     # faturada taksi kalemi varsa). kalemler verilmezse jeneriklere düşülür.
     sektor_kelime = _sektor_kelime_sec(is_kolu, kalemler)
-    suffix = random.choice(IS_KOLU_SUFFIX[is_kolu])
+    # SEKTÖR KELİMESİ ile SUFFIX AYNI KELİMEYİ TAŞIYABİLİR -- şablon ikisini yan
+    # yana koyduğu için unvanda birebir tekrar doğuyordu (2026-07-30'da ölçüldü):
+    #   'Manav' + 'Danışmanlık' + 'Danışmanlık A.Ş.'  -> 'Manav Danışmanlık Danışmanlık A.Ş.'
+    # Aynı çakışma ULASIM ('Turizm' + 'Turizm Taş.'), GIYIM ('Tekstil' + 'Tekstil
+    # Tic.'), KISISEL_BAKIM ('Kozmetik' + 'Kozmetik Tic.') ve ORGANIZASYON
+    # ('Prodüksiyon' + 'Prodüksiyon A.Ş.') için de vardı; tek tek düzeltmek yerine
+    # seçim aşamasında engellenir. Tüm adaylar çakışıyorsa kısıt uygulanmaz
+    # (hukuki ek unvanın zorunlu parçası, atlanamaz).
+    # Çakışma denetimi İKİ AŞAMALI (ikincisi 2026-07-30'da eklendi):
+    #  (1) AYNI kelime      : 'Danışmanlık' + 'Danışmanlık A.Ş.'
+    #  (2) FARKLI ama AYNI EKSENDEN iki sektör kelimesi: 'Consulting' +
+    #      'Danışmanlık A.Ş.' (aynı şeyin iki dildeki karşılığı), 'Organizasyon'
+    #      + 'Prodüksiyon A.Ş.'. Ölçüldü: sentetik adların bir kısmı böyle
+    #      çıkıyordu. Ölçüt suffix'in bu iş kolunun sektör kelimelerinden
+    #      HERHANGİ birini taşıyıp taşımadığı -- ad zaten bir sektör kelimesi
+    #      aldıysa suffix'in ikincisini getirmesine gerek yok.
+    _sektor_kelimeleri = IS_KOLU_SEKTOR_KELIME[is_kolu]
+    adaylar = [
+        s for s in IS_KOLU_SUFFIX[is_kolu]
+        if not _ayni_kelimeyi_tasiyor(sektor_kelime, s)
+        and not any(_ayni_kelimeyi_tasiyor(sk, s) for sk in _sektor_kelimeleri)
+    ]
+    suffix = random.choice(adaylar or IS_KOLU_SUFFIX[is_kolu])
     ozel_isim = rastgele_soyisim()
 
     sablon = random.choices(
@@ -1009,12 +1402,136 @@ def rastgele_birim(kategori: HarcamaKategorisi) -> str:
     return random.choice(BIRIM_HAVUZU[kategori])
 
 
-def rastgele_birim_fiyat(kategori: HarcamaKategorisi, birim: str) -> Decimal:
-    # Önce (kategori, birim) özel araliğina bak, yoksa genel kategori araliğina düş
-    aralik = FIYAT_ARALIGI_DETAYLI.get(
-        (kategori, birim),
-        FIYAT_ARALIGI_GENEL[kategori]
-    )
+# ÜRÜN TİPİ fiyat araliği -- ÜÇÜNCÜ ve EN ÖNCELIKLI katman (2026-07-30).
+#
+# Mevcut iki katman (kategori, birim) ve (kategori) bazliydi; kategori icindeki
+# fiyat DAGILIMINI ayirt edemiyor. Havuza ucuz sarf malzemesi girince
+# (havlu kagidi, cop poseti, pecete) bunlar TEMIZLIK/OFIS_SARF'in genis
+# araligindan fiyat aldi ve absurt satirlar dogdu -- OLCULDU (25k batch):
+#   6 x 32.574 TL = 195.444 TL  'F Saff Havlu Kagidi 12 Li'
+#   1 x 16.065 TL =  16.065 TL  'Selin Kolonya 400Ml'
+# Gunluk sarf kategorilerinde 15.000 TL ustu 284 satir (%0,43).
+# Model 195 bin TL'lik pecete icin kurumsal gerekce yazamaz (§17: aciklama
+# kalitesi FISE baglidir).
+#
+# SIRA ONEMLI, ilk eslesen kazanir. Desenler ADA bakar, kategoriye degil --
+# ayni urun tipi birden fazla kategoride gecebiliyor.
+# ---------------------------------------------------------------------------
+# FIYAT KATMANLARI -- daralan hiyerarsi (2026-07-30'da ucuncu basamak eklendi):
+#     kategori  ->  (kategori, birim)  ->  (kategori, urun tipi)
+#
+# NEDEN URUN TIPI KATEGORININ ALTINDA: ilk surumde urun tipi KATEGORIDEN BAGIMSIZ
+# duz bir listeydi ve dogrudan bug uretti -- 'batarya' deseni hem OFIS_SARF
+# (esik 5) hem TEKNOLOJI_EKIPMAN (esik 300) kalemlerine ayni araligi veriyordu,
+# 40-300 TL arasi her telefon bataryasi TEMIZ faturayi sahte `dusuk_ondalik_
+# kaymasi` etiketine dusuruyordu. Olculdu: dusuk_ondalik_kaymasi 2.627 -> 5.499,
+# anomali orani 0,2586 -> 0,2764.
+#
+# SOZLESME KATEGORIYLEDIR: validators kalem duzeyinde YALNIZ harcama_kategorisi'ne
+# bakar (is_kolu'yu hic gormez). O yuzden guvenlik cipasi kategori olmali;
+# is_kolu ustte IS_KOLU_KATEGORILERI ile zaten baglanmis durumda.
+#
+# ARALIK YAZARKEN: asagidaki _fiyat_araliklarini_dogrula import aninda kontrol
+# eder ve bandin disina cikan araligi GURULTULU sekilde reddeder. Sessiz kirpma
+# YOK -- yanlis bir deger yazarsan ekranda gorursun.
+FIYAT_ARALIGI_URUN_TIPI: dict[HarcamaKategorisi, list[tuple[re.Pattern, tuple[int, int]]]] = {
+    HarcamaKategorisi.TEMIZLIK: [
+        (re.compile(r"havlu ?ka[g\u011f]|pe[c\u00e7]ete|tuvalet ka[g\u011f]|[\u0131i]slak mendil|mendil", re.I), (30, 220)),
+        (re.compile(r"[c\u00e7][o\u00f6]p (torba|po[s\u015f]et)|buzdolab[\u0131i] po[s\u015f]|po[s\u015f]et", re.I), (30, 180)),
+        (re.compile(r"eldiven|s[u\u00fc]nger|bula[s\u015f][\u0131i]k teli|ovma", re.I), (30, 160)),
+        (re.compile(r"stre[c\u00e7] film|al[u\u00fc]minyum folyo", re.I), (30, 200)),
+        (re.compile(r"kolonya|sabun|deterjan|[c\u00e7]ama[s\u015f][\u0131i]r suyu|yumu[s\u015f]at", re.I), (30, 450)),
+    ],
+    HarcamaKategorisi.OFIS_SARF_MALZEME: [
+        (re.compile(r"kartvizit", re.I), (150, 900)),
+        (re.compile(r"toner|kartu[s\u015f]|dolum", re.I), (700, 6000)),
+        (re.compile(r"\ba4\b|\ba3\b|fotokopi ka[g\u011f][\u0131i]d|yaz[\u0131i]c[\u0131i] ka[g\u011f]", re.I), (150, 900)),
+        (re.compile(r"ban[td]\b|band[\u0131i]|yap[\u0131i][s\u015f]t[\u0131i]r|z[\u0131i]mba|ata[s\u015f]", re.I), (50, 250)),
+        (re.compile(r"kalem|silgi|kalemtira[s\u015f]|cetvel|defter|bloknot|dosya|klas[o\u00f6]r"
+                    r"|zarf|delge[c\u00e7]|klips|ar[s\u015f]iv kutu|not ka[g\u011f][\u0131i]d", re.I), (50, 320)),
+    ],
+    HarcamaKategorisi.KISISEL_BAKIM: [
+        (re.compile(r"a[g\u011f]da|epilasyon", re.I), (55, 450)),
+        (re.compile(r"kolonya|sabun|[s\u015f]ampuan|di[s\u015f] f[\u0131i]r[c\u00e7]a|di[s\u015f] macun", re.I), (55, 450)),
+    ],
+}
+
+
+# Asagi/yukari fat-finger bandinin carpanlari. BURADA tanimli cunku validators.py
+# zaten bu modulden import ediyor (ters yon dairesel olurdu) ve iki tarafin AYNI
+# sayiyi kullanmasi sart: uretim bu bandin disina ciktigi anda TEMIZ fatura
+# kendiliginden ondalik-kaymasi etiketi alir.
+ONDALIK_KAYMASI_ALT_BANT_CARPANI = Decimal("10")
+ONDALIK_KAYMASI_UST_BANT_CARPANI = Decimal("5")
+
+# rastgele_birim_fiyat'in %10'luk "gurultu" dalinin aralik disina tasma orani.
+# Dogrulama bu tasmayi HESABA KATAR, aksi halde aralik guvenli gorunup uretim
+# yine bandin disina cikardi.
+FIYAT_TASMA_ORANI = 0.3
+
+
+def _guvenli_bant(kategori: HarcamaKategorisi) -> tuple[float, float]:
+    """Kategorinin ondalik-kaymasi etiketi ALMAYAN fiyat araligi."""
+    lo, hi = FIYAT_ARALIGI_GENEL[kategori]
+    return (lo / float(ONDALIK_KAYMASI_ALT_BANT_CARPANI),
+            hi * float(ONDALIK_KAYMASI_UST_BANT_CARPANI))
+
+
+def _fiyat_araliklarini_dogrula() -> list[str]:
+    """Her (kategori, urun tipi) araligi -- TASMA DAHIL -- kategorinin guvenli
+    bandinin icinde mi? Import aninda calisir; ihlali sessizce duzeltmez,
+    listeler. Ayni denetim (kategori, birim) katmanina da uygulanir."""
+    hatalar: list[str] = []
+
+    def _kontrol(kategori, etiket, low, high):
+        # DENETIM, URETIMIN GERCEKTE YAPTIGIYLA AYNI OLMALI:
+        #  - %90'lik triangular dal asla `low`un ALTINA inmez -> alt kontrol `low`
+        #  - %10'luk tasma dali zaten `max(bant_alt, low - tasma)`ya kirpiliyor,
+        #    yani alt taraf yapisal olarak guvenli; onu ayrica denetlemek her
+        #    araligi uyari olarak isaretler ve uyarilari anlamsizlastirirdi.
+        #  - UST tarafta kirpma YOK, o yuzden tasma HESABA KATILIR.
+        bant_alt, bant_ust = _guvenli_bant(kategori)
+        if low < bant_alt:
+            hatalar.append(
+                f"{kategori.value}/{etiket}: alt sinir {low:.0f} < guvenli {bant_alt:.0f}"
+                f" -> sahte dusuk_ondalik_kaymasi")
+        efektif_ust = high + (high - low) * FIYAT_TASMA_ORANI
+        if efektif_ust > bant_ust:
+            hatalar.append(
+                f"{kategori.value}/{etiket}: ust {efektif_ust:.0f} > guvenli {bant_ust:.0f}"
+                f" -> sahte ondalik_kaymasi")
+    for kategori, kayitlar in FIYAT_ARALIGI_URUN_TIPI.items():
+        for desen, (low, high) in kayitlar:
+            _kontrol(kategori, desen.pattern[:24], low, high)
+    for (kategori, birim), (low, high) in FIYAT_ARALIGI_DETAYLI.items():
+        _kontrol(kategori, birim, low, high)
+    return hatalar
+
+
+_FIYAT_ARALIK_HATALARI = _fiyat_araliklarini_dogrula()
+if _FIYAT_ARALIK_HATALARI:
+    print("[!] FIYAT ARALIGI UYARISI -- bu araliklar TEMIZ faturada sahte anomali uretir:")
+    for _h in _FIYAT_ARALIK_HATALARI:
+        print(f"      {_h}")
+
+
+def _urun_tipi_araligi(kategori: HarcamaKategorisi, aciklama: str) -> tuple[int, int] | None:
+    """Kategorinin urun tipi araliklari icinde ilk eslesen -- SIRA ONEMLI."""
+    for desen, aralik in FIYAT_ARALIGI_URUN_TIPI.get(kategori, ()):
+        if desen.search(aciklama):
+            return aralik
+    return None
+
+
+def rastgele_birim_fiyat(kategori: HarcamaKategorisi, birim: str,
+                         aciklama: str = "") -> Decimal:
+    # Katman sirasi (daralandan genele): (kategori,urun tipi) -> (kategori,birim) -> kategori
+    aralik = _urun_tipi_araligi(kategori, aciklama) if aciklama else None
+    if aralik is None:
+        aralik = FIYAT_ARALIGI_DETAYLI.get(
+            (kategori, birim),
+            FIYAT_ARALIGI_GENEL[kategori]
+        )
     low, high = aralik
 
     # %90 ihtimalle normal aralikta, %10 ihtimalle aralik dişina taşan
@@ -1022,12 +1539,17 @@ def rastgele_birim_fiyat(kategori: HarcamaKategorisi, birim: str) -> Decimal:
     if random.random() < 0.90:
         fiyat = random.triangular(low, high, low + (high - low) * 0.2)
     else:
-        # Araliğin biraz dişina taşan aykiri (ama fahiş olmayan) bir değer
-        disari_tasma = (high - low) * 0.3
-        fiyat = random.uniform(max(0, low - disari_tasma), high + disari_tasma)
+        # Aralığın biraz dışına taşan aykırı (ama fahiş olmayan) değer.
+        # ALT SINIR `max(0, ...)` DEGIL guvenli bandin tabani (2026-07-30):
+        # tabani yuksek kategorilerde (OFIS_MOBILYA 2000, TEKNOLOJI 3000)
+        # low - %30 tasma 0'a iniyordu ve 'Metal Kitaplik 93 TL' gibi fiyatlar
+        # TEMIZ faturayi sahte `dusuk_ondalik_kaymasi`ya dusuruyordu. Bu, urun
+        # tipi katmanindan ONCE de vardi.
+        tasma = (high - low) * FIYAT_TASMA_ORANI
+        bant_alt, _ = _guvenli_bant(kategori)
+        fiyat = random.uniform(max(bant_alt, low - tasma), high + tasma)
 
     return Decimal(str(round(fiyat, 2)))
-
 
 
 def kdv_orani_belirle(kategori: HarcamaKategorisi) -> float:
@@ -1041,37 +1563,72 @@ def rastgele_miktar(birim: str) -> float:
     else:
         return round(random.uniform(0.5, 10), 2)
 
+def _tekrarsiz_sec(havuz: list[str], kullanilan: set[str], deneme: int = 5) -> str:
+    """Havuzdan, ayni fisde HENUZ KULLANILMAMIS bir aciklama secer.
+
+    Havuzu bastan filtrelemek yerine birkac kez YENIDEN CEKER: filtreleme
+    500 bin elemanli havuzda kalem basina O(n) maliyet demek, yeniden cekim
+    O(1). `deneme` kadar denedikten sonra bulamazsa sonuncuyu kabul eder
+    (kucuk havuzda takilip kalmamak icin).
+
+    NEDEN GEREKLI (2026-07-30'da olculdu): eski kod havuz 500'den buyukse
+    dedup'i tamamen kapatiyordu, gerekce "buyuk havuzda cakisma ~0"di. Yanlis
+    cikti -- 25k fisin 409'unda (%1,64) ayni kalem iki kez vardi ('F Saff Cop
+    Poseti Buyuk Boy' x2). Sebep havuzun mutlak buyuklugu degil, ESIGI YENI
+    ASAN havuzlar (ofis_sarf 163 -> 4.080, icinde neredeyse ayni varyantlar)
+    ve firma adi kisitinin havuzu daraltmasi."""
+    for _ in range(deneme):
+        aciklama = random.choice(havuz)
+        if aciklama not in kullanilan:
+            break
+    kullanilan.add(aciklama)
+    return aciklama
+
+
 def rastgele_kalem(
     kalem_no: int,
     izinli_kategoriler: list[HarcamaKategorisi],
     kullanilan_aciklamalar: set[str],
-    yemek_havuzu: list[str] | None = None,) -> FaturaKalemi:
+    yemek_havuzu: list[str] | None = None,
+    dar_havuzlar: dict[HarcamaKategorisi, list[str]] | None = None,) -> FaturaKalemi:
     """`yemek_havuzu` verilirse YEMEK_HIZMETI kalemleri genel havuz yerine ondan
-    seçilir (firma adına göre mutfak kısıtı; bkz. mutfak_havuzu_sec)."""
+    seçilir (firma adına göre mutfak kısıtı; bkz. mutfak_havuzu_sec).
+    `dar_havuzlar` verilirse o kategorilerde genel havuz yerine firma adına göre
+    daraltılmış havuz kullanılır (bkz. FIRMA_ADI_KISITLARI) -- kuruyemişçi yalnız
+    kuruyemiş satar. İkisi farklı eksenler: mutfak kısıtı menü BÖLÜMÜ seçer,
+    bu ürün ADI deseniyle süzer."""
     kategori = random.choice(izinli_kategoriler)
+    _dar = (dar_havuzlar or {}).get(kategori)
 
     # Büyük havuzlarda (CSV kaynaklı, binlerce eleman) tekrar filtresi hem
     # gereksiz maliyetli hem de anlamsız (çakışma ihtimali zaten ~0),
     # o yüzden sadece küçük (elle yazılmış) havuzlarda filtreleme yapılır.
     BUYUK_HAVUZ_ESIGI = 500
 
-    if kategori == HarcamaKategorisi.TEMEL_GIDA:
+    if _dar:
+        # Firma adı kısıtı bu kategoriyi daraltmış -- TEMEL_GIDA'nın iki-havuzlu
+        # yolu da dahil her şeyin önüne geçer (kuruyemişçinin gıda kalemi kuruyemiş
+        # havuzundan gelmeli, market havuzundan değil).
+        # Dedup BURADA EN KRITIK: kısıt havuzu daralttığı için çakışma olasılığı
+        # en yüksek dal budur.
+        aciklama = _tekrarsiz_sec(_dar, kullanilan_aciklamalar)
+    elif kategori == HarcamaKategorisi.TEMEL_GIDA:
         # Cesitlilik icin iki ayri kaynaktan agirlikli secim:
         # %60 market_urunleri.csv, %40 temiz_urunler.csv (Supermarket etiketi).
-        # Ikisi de buyuk havuz oldugu icin dedup filtresi uygulanmiyor.
+        # (Supermarket havuzu 2026-07-30'da bosaltildi -- bkz. ilgili yorum.)
         if random.random() < TEMEL_GIDA_MARKET_AGIRLIGI and TEMEL_GIDA_MARKET_HAVUZU:
-            aciklama = random.choice(TEMEL_GIDA_MARKET_HAVUZU)
+            aciklama = _tekrarsiz_sec(TEMEL_GIDA_MARKET_HAVUZU, kullanilan_aciklamalar)
         elif TEMEL_GIDA_SUPERMARKET_HAVUZU:
-            aciklama = random.choice(TEMEL_GIDA_SUPERMARKET_HAVUZU)
+            aciklama = _tekrarsiz_sec(TEMEL_GIDA_SUPERMARKET_HAVUZU, kullanilan_aciklamalar)
         else:
-            aciklama = random.choice(TEMEL_GIDA_MARKET_HAVUZU)
+            aciklama = _tekrarsiz_sec(TEMEL_GIDA_MARKET_HAVUZU, kullanilan_aciklamalar)
     else:
         if kategori == HarcamaKategorisi.YEMEK_HIZMETI and yemek_havuzu:
             havuz = yemek_havuzu   # mutfak kısıtı: firma adına uygun bölümler
         else:
             havuz = ACIKLAMA_HAVUZU[kategori]
         if len(havuz) > BUYUK_HAVUZ_ESIGI:
-            aciklama = random.choice(havuz)
+            aciklama = _tekrarsiz_sec(havuz, kullanilan_aciklamalar)
         else:
             musait_aciklamalar = [a for a in havuz if a not in kullanilan_aciklamalar]
             if not musait_aciklamalar:
@@ -1090,7 +1647,7 @@ def rastgele_kalem(
         harcama_kategorisi=kategori,
         miktar=rastgele_miktar(birim),
         birim=birim,
-        birim_fiyat=rastgele_birim_fiyat(kategori, birim),
+        birim_fiyat=rastgele_birim_fiyat(kategori, birim, aciklama),
         iskonto_orani=random.choices([0.0, 5.0, 10.0], weights=[70, 20, 10])[0],
         kdv_orani=kdv_orani_belirle(kategori),
     )
@@ -1223,6 +1780,14 @@ def rastgele_fatura() -> Fatura:
     # Geniş mutfaklarda (kebap/lokanta/ocakbaşı) None döner, kısıt uygulanmaz.
     yemek_havuzu = mutfak_havuzu_sec(satici_adi)
 
+    # 2c. Firma adi kisiti (restoran DISI iş kolları): ad is_kolu'ndan daha dar bir
+    # yelpaze işaret ediyorsa izinli kategoriler ve/veya kalem havuzları daraltılır
+    # (bkz. FIRMA_ADI_KISITLARI). Eşleşme yoksa mevcut davranış korunur.
+    dar_havuzlar: dict[HarcamaKategorisi, list[str]] = {}
+    _kisit = firma_adi_kisiti_sec(is_kolu, satici_adi)
+    if _kisit is not None:
+        izinli_kategoriler, dar_havuzlar = _kisit
+
     fatura_tarihi = rastgele_tarih()
     fatura_no = rastgele_fatura_no(fatura_tarihi)
 
@@ -1240,7 +1805,8 @@ def rastgele_fatura() -> Fatura:
     kullanilan_aciklamalar: set[str] = set()
     kalemler: list[FaturaKalemi] = []
     for i in range(kalem_sayisi):
-        kalem = rastgele_kalem(i + 1, izinli_kategoriler, kullanilan_aciklamalar, yemek_havuzu)
+        kalem = rastgele_kalem(i + 1, izinli_kategoriler, kullanilan_aciklamalar,
+                               yemek_havuzu, dar_havuzlar)
         if kalem.aciklama in TEKIL_ZORUNLU_ACIKLAMALAR:
             # Bu kalem seçildiği an, öncekiler dahil hepsini atip faturayi
             # TEK kalemli yapiyoruz (taksi/yakit fişi başka kalemle gelmez).

@@ -10,6 +10,7 @@ from schema import (
 from generators.field_generator import (
     ACIKLAMA_HAVUZU, rastgele_birim, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura,
     mutfak_anahtari,
+    firma_kisit_anahtari,
 )
 
 
@@ -490,7 +491,13 @@ def fatura_no_tekrari_uygula(faturalar: list[Fatura], tekrar_sayisi: int) -> Non
                 mutfak = (mutfak_anahtari(f.satici_unvan)
                           if HarcamaKategorisi.YEMEK_HIZMETI in IS_KOLU_KATEGORILERI[f.is_kolu]
                           else None)
-                gruplar.setdefault((f.is_kolu, mutfak), []).append(i)
+                # Restoran DIŞI iş kollarında da aynı gerekçe geçerli (2026-07-30):
+                # f2 f1'in UNVANINI devralıp kendi KALEMLERİNİ koruyor, o yüzden çift
+                # aynı FIRMA_ADI_KISITLARI grubundan seçilmeli. Aksi halde 'Kırtasiye'
+                # adını devralan bir faturada ofis masası kalemi kalır ve kısıt
+                # sessizce delinir -- mutfak anahtarıyla kapatılan boşluğun aynısı.
+                kisit = firma_kisit_anahtari(f.is_kolu, f.satici_unvan)
+                gruplar.setdefault((f.is_kolu, mutfak, kisit), []).append(i)
 
         uygun_gruplar = [idxler for idxler in gruplar.values() if len(idxler) >= 2]
         if not uygun_gruplar:
