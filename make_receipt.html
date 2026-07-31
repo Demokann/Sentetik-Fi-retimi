@@ -90,29 +90,36 @@
 
         <div class="dashed-line"></div>
 
-        <!-- Kalemler Listesi (Başlıksız, market formatı) -->
+        <!-- Kalemler Listesi (Başlıksız, market formatı)
+             Fiyat sütunu İSKONTO ÖNCESİ brüt tutardır (KDV dahil); İNDİRİM satırı
+             gerçek bir düşüm olarak görünür ve  brut - indirim = satir_toplam
+             olur. Eskiden sütuna satir_toplam (iskonto zaten düşülmüş) basılıp
+             altına bir de İNDİRİM eklendiği için fişin toplamı tutmuyordu.
+             Hesap fis_uret.py:kalem_gosterimi'nde -- gerekçesi modül docstring'i. -->
         <table>
             {% for kalem in kalemler %}
             <tr>
                 <td class="item-name">{{ kalem.aciklama }}</td>
                 <td class="item-kdv">%{{ kalem.kdv_orani | int }}</td>
-                <td class="item-price">*{{ kalem.satir_toplam }}</td>
-            </tr> 
-            <!-- Adet 1'den farklıysa veya birim Kg ise alt satıra detay yazdır -->
-            {% if kalem.miktar != 1 or kalem.birim != 'Adet' %}
+                <td class="item-price">*{{ kalem.brut_tutar | tutar }}</td>
+            </tr>
+            <!-- Birim fiyat satırı HER KALEMDE basılır. Koşullu yapılırsa tek
+                 adetli kalemlerde birim fiyat fişten tamamen kaybolur ve
+                 ara_toplam / ondalik_kaymasi anomalileri görselde öğrenilemez
+                 hale gelir. Gösterilen fiyat KDV DAHİL'dir (fiyat sütunuyla
+                 aynı eksende olsun diye). -->
             <tr>
                 <td colspan="3" style="font-size: 10pt; padding-bottom: 4px; color: #222;">
-                    {{ kalem.miktar }} {{ kalem.birim }} X {{ kalem.birim_fiyat }}
+                    {{ kalem.miktar }} {{ kalem.birim }} X {{ kalem.brut_birim | tutar }}
                 </td>
             </tr>
-            {% endif %}
-            
+
             <!-- İskonto varsa eksi olarak alt satıra ekle -->
-            {% if kalem.iskonto_orani > 0 %}
+            {% if kalem.indirim > 0 %}
             <tr>
                 <td class="item-name" style="padding-left: 10px;">İNDİRİM</td>
                 <td class="item-kdv"></td>
-                <td class="item-price">-{{ "%.2f"|format(kalem.ara_toplam * (kalem.iskonto_orani / 100)) }}</td>
+                <td class="item-price">-{{ kalem.indirim | tutar }}</td>
             </tr>
             {% endif %}
             {% endfor %}
@@ -120,15 +127,24 @@
 
         <div class="dashed-line"></div>
 
-        <!-- Toplamlar -->
+        <!-- Toplamlar
+             ARA TOPLAM (KDV hariç) ZORUNLU: footer_kismi anomalisi
+             toplam_vergisiz_tutar ile toplam_kdv_tutari'ndan SADECE BİRİNİ
+             bozuyor (anomaly_injector.py:283). Vergisiz tutar basılmazsa o
+             dalın yaklaşık yarısı fişte hiçbir iz bırakmıyordu -- 25k setinde
+             footer_kismi en büyük tür (1.400 kayıt). -->
         <table>
             <tr>
-                <td style="width: 50%;">TOPKDV</td>
-                <td class="right" style="width: 50%;">*{{ toplam_kdv_tutari }}</td>
+                <td style="width: 50%;">ARA TOPLAM</td>
+                <td class="right" style="width: 50%;">*{{ toplam_vergisiz_tutar | tutar }}</td>
+            </tr>
+            <tr>
+                <td>TOPKDV</td>
+                <td class="right">*{{ toplam_kdv_tutari | tutar }}</td>
             </tr>
             <tr>
                 <td><b>TOPLAM</b></td>
-                <td class="right"><b>*{{ genel_toplam }}</b></td>
+                <td class="right"><b>*{{ genel_toplam | tutar }}</b></td>
             </tr>
         </table>
 
