@@ -47,6 +47,11 @@ def batch_kaydi_olustur(fatura: dict, etiket: dict, aciklama_kategorisi_override
     return {
         "kayit_id": fatura["kayit_id"],   # boru hattinin BENZERSIZ anahtari
         "fatura_no": fatura["fatura_no"],
+        # fatura_tarihi PROMPT'A GİRER: ai_uretimi dalı ~%15 olasılıkla "gereksiz belge
+        # ayrıntısı" olarak gerçek tarihi ister (aciklama_uretim_core.py, AI ayracı).
+        # Alan taşınmadığı sürece prompt'a boş değer gidiyordu ("fiş tarihi ") ve model
+        # ya atlıyor ya tarih uyduruyordu -- 25k'da ~375 ai kaydını etkiliyordu.
+        "fatura_tarihi": fatura["fatura_tarihi"],
         "satici_unvan": fatura["satici_unvan"],
         "kalemler": fatura["kalemler"],
         "aciklama_kategorisi": aciklama_kategorisi_override if aciklama_kategorisi_override is not None else etiket["aciklama_kategorisi"],

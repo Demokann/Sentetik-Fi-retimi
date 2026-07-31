@@ -6,10 +6,15 @@ olarak durur. Hem pilot (aciklama_llm_pilot.py) hem toplu üretim
 asla ayrışmaz.
 """
 
+import os
 import random
 import re
+import threading
+import unicodedata
+import time
 import requests
 from collections import Counter
+from pathlib import Path
 
 OLLAMA_HOST_VARSAYILAN = "http://localhost:11434"
 MODEL_VARSAYILAN = "qwen3:8b"
@@ -53,6 +58,198 @@ MODEL_PROFILLERI: dict[str, dict] = {
         "stop": ["<|im_end|>"],
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# SAĞLAYICI KATMANI (2026-07-29) -- yerel Ollama yanında bulut (Groq) yolu.
+#
+# NEDEN: qwen3:8b pilotunda retry %31-40, kalan ihlal %16 ve kusurların türü
+# (cümle ortasında kesik, bozuk dilbilgisi, "kategori adını kullanma"ya
+# uymama) MODEL KAPASİTESİ eksenindeydi -- prompt yamasıyla çözülmüyordu
+# (docs/faz-b-prompt.md §15, "B yolu: daha güçlü modele taşı").
+#
+# TASARIM: mevcut `ollama_cagir` gövdesine DOKUNULMADI. Sağlayıcı modül
+# düzeyinde bir kez ayarlanır (`saglayici_ayarla`), `ollama_cagir` başında
+# tek satırla dallanır. Böylece tüm çağrı yerleri (pilot, VS, retry, runner)
+# değişmeden çalışır.
+#
+# ÜCRETSİZ KATMAN KOTASI bağlayıcıdır, model hızı değil: 30 istek/dk,
+# 30.000 token/dk. Saniyede 0,5 istek demek -- bu yüzden `--workers`
+# yükseltmenin faydası yok ve istemci tarafında hız sınırlayıcı ŞART
+# (yoksa 429 alır, o faturalar atlanır).
+# ---------------------------------------------------------------------------
+
+GROQ_HOST_VARSAYILAN = "https://api.groq.com/openai/v1"
+# Kaggle/Colab notebook icinde ayaga kalkan vLLM sunucusu (OpenAI-uyumlu).
+VLLM_HOST_VARSAYILAN = "http://localhost:8000/v1"
+
+_SAGLAYICI = "ollama"
+_GROQ_ANAHTAR: str | None = None
+_HIZ_SINIRLAYICI = None
+
+
+def env_yukle(yol: str = ".env") -> dict[str, str]:
+    """Basit .env okuyucu -- python-dotenv bağımlılığı eklememek için.
+
+    `AD=deger` satırlarını okur; boş satır ve `#` yorumlarını atlar. Değerin
+    etrafındaki tırnakları soyar. Dosya yoksa boş dict döner."""
+    degerler: dict[str, str] = {}
+    p = Path(yol)
+    if not p.exists():
+        return degerler
+    for satir in p.read_text(encoding="utf-8").splitlines():
+        satir = satir.strip()
+        if not satir or satir.startswith("#") or "=" not in satir:
+            continue
+        ad, _, deger = satir.partition("=")
+        degerler[ad.strip()] = deger.strip().strip("'\"")
+    return degerler
+
+
+class _HizSinirlayici:
+    """Thread-güvenli token kovası: dakikada en fazla `istek_dk` çağrı.
+
+    ThreadPoolExecutor ile paralel çalışıldığı için kilit şart. Kotayı istemci
+    tarafında uygulamak, sunucudan 429 yiyip faturayı kaybetmekten iyidir."""
+
+    def __init__(self, istek_dk: int):
+        self.aralik = 60.0 / max(istek_dk, 1)
+        self._kilit = threading.Lock()
+        self._sonraki = 0.0
+
+    def bekle(self) -> None:
+        with self._kilit:
+            simdi = time.monotonic()
+            bekleme = self._sonraki - simdi
+            if bekleme > 0:
+                time.sleep(bekleme)
+                simdi = time.monotonic()
+            self._sonraki = simdi + self.aralik
+
+
+def saglayici_ayarla(ad: str, istek_dk: int = 30, env_yolu: str = ".env",
+                     host: str | None = None) -> str:
+    """Sağlayıcıyı ayarlar; kullanılacak varsayılan host'u döner.
+
+    Desteklenen OpenAI-uyumlu yollar:
+      'groq'  -> bulut; API anahtarı ZORUNLU (.env: GROQ_API_KEY)
+      'vllm'  -> kendi sunucun (Kaggle/Colab notebook'unda vLLM); anahtar YOK,
+                 kota da yok -> hız sınırlayıcı devre dışı, `host` verilmeli.
+
+    Anahtar gerektiği hâlde yoksa AÇIK hata verir: sessizce Ollama'ya düşmek,
+    saatler süren bir koşuyu yanlış modelle tamamlatırdı."""
+    global _SAGLAYICI, _GROQ_ANAHTAR, _HIZ_SINIRLAYICI
+    _SAGLAYICI = ad
+    if ad == "ollama":
+        return OLLAMA_HOST_VARSAYILAN
+    if ad == "vllm":
+        # Kendi sunucun: kota yok, sinirlayici yok, anahtar yok. `_SAGLAYICI`
+        # 'groq' olmadigi icin _groq_cagir'in anahtar basligi bos gecer --
+        # vLLM Authorization basligini yok sayar.
+        _GROQ_ANAHTAR = os.environ.get("VLLM_API_KEY", "")
+        _HIZ_SINIRLAYICI = None
+        return host or VLLM_HOST_VARSAYILAN
+    anahtar = os.environ.get("GROQ_API_KEY") or env_yukle(env_yolu).get("GROQ_API_KEY")
+    if not anahtar:
+        raise SystemExit(
+            "GROQ_API_KEY bulunamadi. .env dosyasina su satiri ekleyin:\n"
+            "  GROQ_API_KEY=gsk_..."
+        )
+    _GROQ_ANAHTAR = anahtar
+    _HIZ_SINIRLAYICI = _HizSinirlayici(istek_dk)
+    return host or GROQ_HOST_VARSAYILAN
+
+
+def _groq_cagir(
+    system_prompt: str, user_prompt: str, model: str, host: str,
+    num_predict: int, temperature: float, seed: int | None,
+    stop: list[str] | None, ham: bool, bilgi: dict | None,
+    min_p: float = 0.1,
+) -> str:
+    """OpenAI-uyumlu sohbet tamamlama. Ollama parametrelerinin karşılıkları:
+
+        num_predict -> max_tokens      | done_reason -> finish_reason
+        system/prompt -> messages[]    | keep_alive/num_ctx -> yok (sunucu yönetir)
+
+    `min_p`/`repeat_penalty` SAĞLAYICIYA GÖRE değişir (2026-07-29'da düzeltildi):
+
+    - groq  -> gönderilmez; standart OpenAI şeması bu alanları tanımaz.
+    - vllm  -> GÖNDERİLİR. vLLM OpenAI şemasını genişletir ve bu ikisini kabul
+      eder (canlı doğrulandı, 200 döndü). Göndermezsek sunucu modelin
+      `generation_config.json`'ındaki varsayılanı uygular; yani ayar bizde değil
+      model dosyasında olur. Kaggle'daki ilk 32B koşusunda tam bu oldu:
+      repetition penalty fiilen devre dışı kaldı ve `latin_disi`/`verbatim_kopya`
+      ihlalleri çıktı. Değerler Ollama gövdesiyle BİREBİR aynı tutulur
+      (min_p kategoriden gelir, repeat_penalty 1.15) -- yerel kalibrasyon korunsun.
+
+    `top_k` KASTEN gönderilmez: Ollama yolu da göndermiyor, eklemek kalibrasyonu
+    değiştirirdi."""
+    govde = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": num_predict,
+        "temperature": temperature,
+        "top_p": 0.95,
+        "stream": False,
+    }
+    if _SAGLAYICI == "vllm":
+        govde["min_p"] = min_p
+        # `repetition_penalty` GONDERILMIYOR -- ISIM AYNI, SEMANTIK FARKLI.
+        # Ollama/llama.cpp `repeat_penalty`: son `repeat_last_n` (vars. 64) token.
+        # vLLM `repetition_penalty`: PROMPT token'larini DA cezalandirir.
+        # ~1000 token'lik Turkce prompt'u 1.15 ile cezalandirmak modeli tam da
+        # kullanmasi gereken kelimelerden uzaklastirdi. Olculdu (Kaggle, 500'er
+        # kayit): latin_disi 5->18, uzunluk ihlali 46->75, maks uzunluk 360->451.
+        # min_p semantigi ise iki tarafta AYNI; o kaliyor.
+        #
+        # Qwen3 hibrit dusunen bir model ve vLLM'de dusunme VARSAYILAN ACIK.
+        # Kapatilmazsa <think> blogu max_tokens'i yer, `kesik` ihlali patlar.
+        # CLAUDE.md §5: yerel qwen3'te de `think` kapali; `/no_think` eki ETKISIZ.
+        # 2507 'Instruct' surumleri zaten dusunmez ama alan zararsizdir.
+        if "qwen3" in model.lower():
+            govde["chat_template_kwargs"] = {"enable_thinking": False}
+    if seed is not None:
+        govde["seed"] = seed
+    if stop:
+        govde["stop"] = stop
+
+    # Anahtar bossa (vllm) Authorization basligi HIC gonderilmez.
+    basliklar = {"Authorization": f"Bearer {_GROQ_ANAHTAR}"} if _GROQ_ANAHTAR else {}
+    # 429'da SABIRLI ol: kota penceresi 60 sn'lik, 5 denemede (üstel geri çekilme
+    # ile ~31 sn) pencere kapanmadan pes ediliyordu ve fatura KAYBOLUYORDU
+    # (32'lik pilotta 2 kayıp). Pencereyi rahat aşacak kadar dene.
+    for deneme in range(8):
+        if _HIZ_SINIRLAYICI is not None:
+            _HIZ_SINIRLAYICI.bekle()
+        # 90 -> 180: Kaggle'da 2xT4 uzerindeki 32B'de 16 worker'la tek istek 90 sn'yi
+        # asabiliyor; asinca istisna firliyor ve FATURA DUSUYOR (batch_0001'de 500'un
+        # 28'i = %5,6 kayip, 20k'da ~1.100 kayit ederdi). Yavas sunucuda beklemek
+        # kaydi kaybetmekten ucuz.
+        yanit = http_session.post(
+            f"{host}/chat/completions", json=govde, headers=basliklar, timeout=180
+        )
+        if yanit.status_code == 429:
+            # Sunucu Retry-After veriyorsa ONA uy (kotanın gerçek kalan süresi),
+            # yoksa üstel geri çekil.
+            bekle = float(yanit.headers.get("retry-after", min(2 ** deneme, 30)))
+            time.sleep(min(bekle, 65))
+            continue
+        yanit.raise_for_status()
+        break
+    else:
+        raise RuntimeError("Groq: 8 denemede de kota asimi (429) asilamadi")
+
+    cevap = yanit.json()
+    secim = cevap["choices"][0]
+    if bilgi is not None:
+        # 'kesik' ihlali bu alandan türüyor -- Ollama'daki done_reason'ın karşılığı.
+        bilgi["done_reason"] = "length" if secim.get("finish_reason") == "length" else secim.get("finish_reason")
+    metin = (secim["message"].get("content") or "")
+    metin = _THINK_REGEX.sub("", metin).strip()
+    return metin if ham else cikti_temizle(metin)
 
 
 def model_profili(model: str) -> dict:
@@ -105,7 +302,15 @@ def yasakli_kalem_bul(kalemler: list[dict]) -> dict | None:
 # Firma unvanindaki hukuki ek/suffix'leri temizler -- LLM'e "Yilmaz Gida San.
 # ve Tic. Ltd. Şti." yerine "Yilmaz Gida" gibi konuşma diline yakin bir isim
 # vermek icin (field_generator.py:IS_KOLU_SUFFIX ile SENKRON tutulmali).
-_UNVAN_EKLERI_REGEX = r"\b(A\.Ş\.|Ltd\.\s*Şti\.|Tic\.|San\.|ve|Paz\.|Turizm|Nak\.|Otelcilik|Danişmanlik|Prodüksiyon|Konfeksiyon|Kozmetik|Global|İç|Diş|Ticaret|Sanayi|Taş\.)(?=\s|$)"
+# DİAKRİTİĞE DAYANIKLI yazılır (2026-07-30): burada eskiden literal `Danişmanlik`
+# duruyordu ve field_generator'daki yazım `Danışmanlık`a düzeltildiğinde eşleşme
+# SESSİZCE kesilecekti -- prompt'a 'X Danışmanlık A.Ş.' kısaltılmamış girerdi.
+# Sabitler arası "senkron tut" notu bir insan sözüdür, regex artık kendini korur.
+_UNVAN_EKLERI_REGEX = (
+    r"\b(A\.Ş\.|Ltd\.\s*Şti\.|Tic\.|San\.|ve|Paz\.|Turizm|Nak\.|Otelcilik"
+    r"|Dan[iı]şmanl[iı]k|Prodüksiyon|Konfeksiyon|Kozmetik|Global|İç|Diş"
+    r"|Ticaret|Sanayi|Taş\.)(?=\s|$)"
+)
 
 # Kısaltma YALNIZCA SENTETİK adlara uygulanır. Regex sektör kelimelerini de
 # ("Turizm", "Kozmetik", "Ticaret", "ve") söktüğü için registry'deki GERÇEK OSM
@@ -142,6 +347,42 @@ _RENK_KELIMELERI = {
 # 'kullanıcı yıl' çıkıyordu (ölçüldü: 4000 faturada 486 kalem böyle bozuluyor,
 # 316'sı tam olarak 'kullanıcı yıl'). Bu kelimeler sondan atılır; hepsi
 # atıldığında geriye anlamlı bir baş isim kalmazsa BAŞTAN alınır.
+# KOKU / VARYANT kuyruğu -- market tipi adlarda ürün adından SONRA gelir ve
+# Türkçenin "baş isim sonda" kuralını bozar:
+#   'H.Sakir Guzl Sab.5Li ÇİÇEK BUKETİ 375Gr' -> baş isim 'Sab(un)', kuyruk koku
+#   'Elidor 700 Ml Şampuan ONARICI BAKIM'     -> baş isim 'Şampuan', kuyruk varyant
+#   'Fairy Sivi Bulasik Deterjani 480 Ml LİMON'
+# Ölçüldü (30k fatura, son kelime frekansı): limon 911, lavanta 431, portakal 392,
+# garantili 555. Bu kuyruk atılmazsa sadeleştirme KOKUYU ürün sanıyor ve o hatalı
+# ad `yeterli` talimatına ÖRNEK olarak giriyordu -- pilottaki "çiçek aldım"
+# çıktısının doğrudan kaynağı buydu.
+#
+# Meyve/çiçek adları yalnız SONDA ve BAŞKA kelime varken atılır; tek kelimelik
+# 'Limon' (gerçekten limon alımı) korunur.
+_KOKU_VARYANT_KELIMELERI = {
+    # koku (meyve/çiçek/doğa)
+    "limon", "lavanta", "portakal", "elma", "çiçek", "cicek", "buketi", "buket",
+    "gül", "gul", "vanilya", "şeftali", "seftali", "nar", "karpuz", "çilek",
+    "cilek", "okyanus", "orman", "bahar", "yasemin", "papatya", "narenciye",
+    # varyant / niteleme
+    "kokulu", "koku", "onarici", "onarıcı", "parlaklik", "parlaklık", "ferahlik",
+    "ferahlık", "temel", "klasik", "classic", "sensitive", "ultra", "maxi",
+    "extra", "garantili", "orjinal", "orijinal", "avantajli", "avantajlı",
+    # 'bakim/bakım' SONDA neredeyse her zaman varyanttır ('Şampuan Onarıcı
+    # BAKIM'); baş isim olduğu adlarda ('Cilt Bakım KREMİ') zaten son kelime
+    # değildir, o yüzden atmak güvenli.
+    "bakim", "bakım",
+}
+
+# Market/POS adlarındaki kısaltmalar. Sadeleştirme bunları açmazsa model
+# 'guzl sab' gibi anlamsız bir ifade görüyor.
+_KISALTMA_ACILIMI = {
+    "sab": "sabun", "samp": "şampuan", "sampuan": "şampuan", "det": "deterjan",
+    "deterjani": "deterjan", "bulasik": "bulaşık", "camasir": "çamaşır",
+    "sivi": "sıvı", "yag": "yağ", "tem": "temizlik", "kag": "kağıt",
+    "pesc": "peçete", "guzl": "", "kutulu": "", "paketi": "",
+}
+
 _LISANS_SARTI_KELIMELERI = {
     "yil", "yıl", "yillik", "yıllık", "ay", "aylik", "aylık", "kullanici",
     "kullanıcı", "cihaz", "server", "sunucu", "mobil", "pc", "bilgisayar",
@@ -153,6 +394,34 @@ _LISANS_SARTI_KELIMELERI = {
     "tl", "try", "kodu", "kod", "hediye", "bonus", "cek", "çek", "kupon",
     # ölçü kuyrukları ('10x40 cm', '96x144x30 cm')
     "cm", "mm", "mt", "inc", "inç", "li", "lu", "lı", "lü",
+}
+
+# ÜÇÜNCÜ KUYRUK SINIFI (2026-07-30, model karşılaştırma pilotu): SKU / MODEL KODU.
+# Ölçüldü (200 fiş / 514 kalem): 10 kalem (%1,95) bozuk sadeleştirme veriyordu --
+# '4byz monza', '120g servis', 'sunger 1ad', 'kahve 3x250'. Pilotta "Müşteri
+# ziyareti için 4byz monza aldım." diye görünüyordu.
+#
+# Kelime LİSTESİYLE çözülemez (kodlar sonsuz varyasyonda) ve KUYRUK DÖNGÜSÜYLE de
+# çözülemez, çünkü kod SONDA olmak zorunda değil: '... Eames Sandalye Snd3016-4byz
+# Monza' adında kodlar ORTADA, son kelime ('monza') gerçek bir kelime olduğu için
+# kuyruk döngüsü hiç başlamıyor. O yüzden desen bazlı ve TÜM konumlardan silinir.
+#
+# İSTİSNA -- KISA MODEL BELİRTECİ KORUNUR ('v15', 'g2', 'a4'): bunlar insanın da
+# söylediği ayırt edici adlardır ('lenovo v15' iyi bir sadeleştirmedir). Ölçüt
+# harf-önce + kısa; SKU'lar rakam-önce ('4byz', '120g', '1ad') ya da uzun-karışık
+# ('snd3016', '21mhakkh2318pnt0') olur.
+_MODEL_BELIRTECI_KORU = re.compile(r"^[^\W\d_]{1,2}\d{1,4}$", re.UNICODE)
+_SKU_KODU = re.compile(r"^(?=\w*\d)(?=\w*[^\W\d_])\w+$|^\d+[xX]\d+$", re.UNICODE)
+
+# NİTELİK KUYRUĞU -- `_LISANS_SARTI_KELIMELERI`'nden AYRI TUTULMALI. Fark KONUM
+# VARSAYIMINDADIR: lisans kuyruğu atıldığında baş isim BAŞA kayar ('Bitdefender
+# GravityZone Business Security - 6 Kullanıcı - 3 Yıl' -> 'bitdefender gravityzone'),
+# ama nitelik kuyruğu atıldığında Türkçe kuralı GEÇERLİ KALIR, baş isim hâlâ SONDADIR
+# ('Chia Tohumu (glutensiz) 1 Kg' -> 'chia tohumu'). İkisi aynı kümeye konursa
+# parantezli nitelik baştan-alma dalını tetikler ve 'the spicex' çıkar.
+_NITELIK_KUYRUGU = {
+    "glutensiz", "sekersiz", "şekersiz", "laktozsuz", "katkisiz", "katkısız",
+    "tuzsuz", "organik", "vegan", "rafine", "servis", "porsiyon",
 }
 
 
@@ -170,11 +439,56 @@ def kalem_adi_sadelestir(ad: str) -> str:
     `yeterli` talimatındaki SADELEŞTİRME örneğini faturanın KENDİ kaleminden kurmak
     için: sabit örnekler ('F Saff Sıvı El Sabunu 500Ml' -> 'el sabunu') 8B'de
     içeriğe sızıyordu (model örnekteki ürünü alakasız fişte anlatıyordu)."""
-    sade = _URUN_DETAY_GURULTU.sub(" ", ad)
+    # NFC normalize ŞART: 'Li̇mon' gibi adlarda 'i' + U+0307 (birleşen nokta)
+    # ayrı kod noktası olarak duruyor; `[^\w\s]` onu boşluğa çevirip kelimeyi
+    # ORTADAN bölüyordu ('Limon Kokulu' -> 'mon kokulu'). Ölçüldü: 20k faturada
+    # kalemlerin %2,3'ü birleşen nokta içeriyor.
+    # NFC tek başına YETMEZ: 'i' + U+0307 için önceden birleştirilmiş karakter
+    # yoktur, o yüzden birleşen nokta ayrıca SİLİNİR (_tr_normalize'daki ile
+    # aynı yöntem). Aksi halde `[^\w\s]` onu boşluğa çevirip kelimeyi ortadan
+    # bölüyor: 'Li̇mon Kokulu' -> 'li mon'.
+    sade = unicodedata.normalize("NFC", ad).replace("̇", "")
+    sade = _URUN_DETAY_GURULTU.sub(" ", sade)
     sade = re.sub(r"[^\w\s]", " ", sade)
     kelimeler = [k for k in sade.split() if len(k) > 1 and not k.isdigit()]
     while kelimeler and (_tr_normalize(kelimeler[-1]) in _OLCU_AMBALAJ_KELIMELERI
                          or _tr_normalize(kelimeler[-1]) in _RENK_KELIMELERI):
+        kelimeler.pop()
+
+    # KOKU/VARYANT kuyruğunu at (bkz. _KOKU_VARYANT_KELIMELERI). Tek kelime
+    # kalırsa DURMA: 'Limon' tek başına gerçekten limon alımıdır, koku değil.
+    while len(kelimeler) > 1 and _tr_normalize(kelimeler[-1]) in _KOKU_VARYANT_KELIMELERI:
+        kelimeler.pop()
+
+    # Kısaltmaları aç ('sab' -> 'sabun'); karşılığı boş olanlar ('guzl') düşer.
+    acilmis: list[str] = []
+    for k in kelimeler:
+        yeni = _KISALTMA_ACILIMI.get(_tr_normalize(k), k)
+        if yeni:
+            acilmis.append(yeni)
+    kelimeler = acilmis or kelimeler
+
+    # SKU/model kodlarını TÜM konumlardan sil (kuyrukta olmak zorunda değil, bkz.
+    # _SKU_KODU). Hepsi koddan ibaretse dokunulmaz -- geriye hiç kelime bırakmamak
+    # yerine bozuk adı olduğu gibi bırakmak yeğdir.
+    kodsuz = [k for k in kelimeler
+              if not _SKU_KODU.match(k) or _MODEL_BELIRTECI_KORU.match(k)]
+    if kodsuz:
+        kelimeler = kodsuz
+
+    # Kod silinince geriye AYNI kelime iki kez kalabiliyor ('ACER Aspire3
+    # A315-56-327t ... Nx Hs5ey Nx ...' -> 'nx nx'). Marka/model adı ham adda
+    # zaten tekrar ediyordu, araya giren kod onu gizliyordu. Ardışık tekrarı
+    # düşür -- 'nx nx' insan metninde gülünç durur.
+    tekrarsiz: list[str] = []
+    for k in kelimeler:
+        if not tekrarsiz or _tr_normalize(k) != _tr_normalize(tekrarsiz[-1]):
+            tekrarsiz.append(k)
+    kelimeler = tekrarsiz
+
+    # Nitelik kuyruğunu at -- KONUM VARSAYIMINI DEĞİŞTİRMEZ, o yüzden aşağıdaki
+    # lisans bloğundan ÖNCE ve ondan AYRI uygulanır (bkz. _NITELIK_KUYRUGU).
+    while len(kelimeler) > 1 and _tr_normalize(kelimeler[-1]) in _NITELIK_KUYRUGU:
         kelimeler.pop()
 
     # Lisans şartı kuyruğunu at, ama SİL-BAŞTAN ALMA kararı için ayrı tut:
@@ -229,7 +543,20 @@ UZUNLUK_HEDEFLERI = [
     ("çok kısa", "en fazla 4-5 kelimelik tek bir öbek", 8, 45),
     ("kısa", "tek cümle, 6-10 kelime", 20, 85),
     ("orta", "1-2 cümle", 45, 150),
-    ("uzun", "2-3 cümle, biraz daha detaylı", 90, 250),
+    # ÜST SINIR 250 -> 200 (2026-07-29). Ölçüldü: manipulatif dağılmalarının
+    # TAMAMI uzun bantta -- 244 krk'lık bir çıktıda İngilizce kelime bile sızdı
+    # ('ortamınınpositive bir atmosferde'), 148-153 krk olanlar geveze, 34-83
+    # krk olanlar temiz. 250 karakterlik alan modele dağılacak yer bırakıyordu.
+    #
+    # KATEGORİYE ÖZEL kısaltma YAPILMADI (manipulatif'e ayrı tavan gibi):
+    # `uzunluk_hedefi_sec` kasten kategoriden bağımsızdır, amacı kategori↔uzunluk
+    # sahte korelasyonunu kırmaktır (leakage önlemi). Bandı GLOBAL indirmek o
+    # bağımsızlığı korur.
+    #
+    # KESİLME RİSKİ YOK: `token_limiti = ust/2.0 + 30` -> 200'de 130 token, Llama
+    # Türkçede 3,24 krk/token ürettiği için ~420 karakterlik fiili kapasite =
+    # hedefin 2,1 katı. Eski kesilme sorunu qwen3'teydi (~2 krk/token, bütçe dar).
+    ("uzun", "2-3 cümle, biraz daha detaylı", 90, 200),
 ]
 
 # Kategori başına yumuşak ağırlık: dört uzunluğa da şans verir, sadece eğim farkı.
@@ -246,7 +573,15 @@ _UZUNLUK_AGIRLIK = {
     # manipulatif de "çok kısa" alamaz -- kurumsal kılıf 45 karaktere sığmıyor (bkz.
     # ihlalleri_bul'daki 55 karakterlik alt sınır).
     "manipulatif": [0.00, 0.30, 0.45, 0.25],
-    "yeterli": [0.20, 0.35, 0.30, 0.15],
+    # yeterli de "çok kısa" (8-45 krk) ALAMAZ (2026-07-30) -- manipulatif ve
+    # ai_uretimi için zaten kapalı olan durumun aynısı, ölçümle doğrulandı:
+    #     "çok kısa" ATANMA oranı %20  ↔  fiilen ≤45 krk YAZILAN %7
+    # Aradaki ~%13 KARŞILANAMAZ hedef: `yeterli` amacı + kalemi + (yeni kuralla)
+    # fişten türetilemeyen bir sebebi 45 karaktere sığdıramıyor. Sonuç garanti
+    # ihlal ve retry'nin düzeltemediği bir flag.
+    # KANIT: son pilotta 18 uzunluk ihlalinin 16'sı (%89) `yeterli`den geldi;
+    # ihlallerin TAMAMI alt sınır ihlaliydi (hiçbir metin üst toleransı aşmadı).
+    "yeterli": [0.00, 0.40, 0.40, 0.20],
 }
 
 
@@ -328,6 +663,18 @@ FEWSHOT_MANIPULATIF = {
         "Kurulum aynı gün bitmeliydi, elimizdeki tek seçenek buydu.",
         "Müşteri programı değişti, son anda oradan almak zorunda kaldım.",
         "Stok tükenmişti ve iş bekleyemezdi, bulabildiğim yerden temin ettim.",
+    ],
+    # MAĞDURİYET (2026-07-30) -- dal başına AYRI havuz ŞART (§6): ortak havuz
+    # kullanılırsa bu dala vurgulu/kurumsal kılıflı örnekler girer ve karakter
+    # bozulur. `zorunluluk`tan farkı öznede: orada İŞ dayatıyor, burada ÇALIŞANIN
+    # başına geliyor. Örneklerde vurgu ifadesi YOK, şikâyet tonu YOK -- sakin
+    # anlatım, karşı taraf hak versin diye.
+    "magduriyet": [
+        "Müşteri toplantısına yetişmem gerekiyordu, taksiye binmek zorunda kaldım.",
+        "Görüşme uzayınca son servisi kaçırdım, geceyi orada geçirdim.",
+        "Sahada beklemediğim bir aksilik çıktı, cebimden karşılamak durumunda kaldım.",
+        "Ekip için hazırlık yapacaktık ama ofiste hiçbir şey yoktu, ben tamamladım.",
+        "Dönüş yolunda araç bozuldu, orada beklerken bunu almak zorunda kaldım.",
     ],
 }
 
@@ -807,6 +1154,212 @@ MANIPULATIF_KILIF_KALEM = [
     "departman bütçe kullanımı", "planlanmış tedarik",
 ]
 
+# KILIF <-> KATEGORİ UYUMU (2026-07-30). Önce kılıf havuzu KATEGORİDEN BAĞIMSIZ
+# seçiliyordu ve `kilif_notu_uret` kategoriyi parametre olarak ALIP KULLANMIYORDU.
+# Sonuç, kullanıcı incelemesindeki "alakasız kelimeleri yan yana getirmiş" vakası:
+#     'Taksim Hamburger'den alınan yemek, YÖNETİM KADEMESİ ÇALIŞMASI sürerken
+#      sağlanan destek.'
+#     'Kuşku Etkinlik'ten aldığım ürünleri BÜYÜK BİR HEDEFE ULAŞMAK adına harcadım.'
+# Beğenilen örneklerin ortak yanı ise kılıfın kalemden TÜREMESİ:
+#     'API kullanım ücreti, SİSTEM ENTEGRASYON SÜRECİNDE ... belirlenmiş bir maliyet'
+#
+# KILIF ÜRÜN ADI İÇERMEZ (CLAUDE.md §8): kategoriye KOŞULLANIR, kalem adını
+# tekrarlamaz -- havuza ürün adı konduğunda model fişte olmayan ürünü almış gibi
+# yazıyordu. Buradaki tüm girdiler soyut kurumsal ifadeler.
+#
+# Her kategori KILIF_GENEL ile birleştiği için havuz 14-18 arasında kalır;
+# collapse riski yok (§8: "sabit kalıp collapse üretir, havuz üretmez").
+KILIF_GENEL = [
+    "operasyonel süreklilik", "iş sürekliliği gereği", "süreç iyileştirme",
+    "verimlilik çalışması", "performans takibi", "maliyet optimizasyonu çalışması",
+]
+KILIF_KATEGORI: dict[str, list[str]] = {
+    "yemek_hizmeti": ["ekip motivasyonu programı", "takım ruhu etkinliği", "moral bütçesi",
+                      "misafir protokolü", "iş ortaklığı görüşmesi", "müşteri memnuniyeti çalışması",
+                      "paydaş ilişkileri", "kurumsal temsil", "protokol gereği",
+                      "yıllık plan görüşmesi", "iç iletişim çalışması"],
+    "temel_gida": ["ekip motivasyonu programı", "takım ruhu etkinliği", "moral bütçesi",
+                   "misafir protokolü", "iç iletişim çalışması", "kültür geliştirme faaliyeti",
+                   "kurumsal temsil", "müşteri memnuniyeti çalışması"],
+    "konaklama": ["yıllık plan görüşmesi", "iş ortaklığı görüşmesi", "üst düzey koordinasyon",
+                  "saha uyum çalışması", "kurumsal temsil", "stratejik değerlendirme",
+                  "protokol gereği", "kritik karar süreci"],
+    # Süreç dili (operasyonel süreklilik, süreç iyileştirme, verimlilik...) YEMEK ve
+    # KONAKLAMA için uyumsuzdu ama ULAŞIM/TEKNOLOJİ/OFİS için doğal. Bu yüzden
+    # jenerik havuzu her kategoriye eklemek yerine UYDUĞU kategorilere dağıtıldı;
+    # her liste KILIF_OZEL_YETERLI_ESIK'e (8) ulaştığı için artık jenerik eklenmiyor.
+    "ulasim_hizmeti": ["saha uyum çalışması", "üst düzey koordinasyon", "kapasite planlaması",
+                       "entegrasyon çalışması", "iş ortaklığı görüşmesi",
+                       "operasyonel süreklilik", "iş sürekliliği gereği", "performans takibi"],
+    "ulasim_bireysel": ["saha uyum çalışması", "üst düzey koordinasyon", "performans takibi",
+                        "iş ortaklığı görüşmesi", "kritik karar süreci",
+                        "operasyonel süreklilik", "iş geliştirme faaliyeti", "networking faaliyeti"],
+    "ofis_sarf_malzeme": ["kapasite planlaması", "kültür geliştirme faaliyeti",
+                          "iç iletişim çalışması", "kalite güvence adımı", "yol haritası çalışması",
+                          "süreç iyileştirme", "verimlilik çalışması", "operasyonel süreklilik"],
+    "ofis_mobilya": ["kapasite planlaması", "kültür geliştirme faaliyeti", "yatırım öncesi hazırlık",
+                     "çalışan bağlılığı çalışması", "kurumsal görünürlük",
+                     "verimlilik çalışması", "süreç iyileştirme", "iç iletişim çalışması"],
+    "teknoloji_ekipman": ["entegrasyon çalışması", "risk azaltma tedbiri", "kalite güvence adımı",
+                          "yatırım öncesi hazırlık", "kapasite planlaması",
+                          "iş sürekliliği gereği", "süreç iyileştirme",
+                          "maliyet optimizasyonu çalışması"],
+    "yazilim_lisans": ["entegrasyon çalışması", "risk azaltma tedbiri", "kalite güvence adımı",
+                       "yol haritası çalışması", "stratejik değerlendirme",
+                       "iş sürekliliği gereği", "süreç iyileştirme",
+                       "maliyet optimizasyonu çalışması"],
+    "danismanlik": ["stratejik değerlendirme", "yönetsel istişare", "yol haritası çalışması",
+                    "kritik karar süreci", "risk azaltma tedbiri", "yıllık plan görüşmesi",
+                    "kapasite planlaması", "maliyet optimizasyonu çalışması"],
+    "kisisel_bakim": ["kurumsal itibar yönetimi", "marka temsili", "misafir protokolü",
+                      "kurumsal görünürlük", "saha uyum çalışması", "kurumsal temsil",
+                      "protokol gereği", "ilişki yönetimi"],
+    "temizlik": ["kurumsal itibar yönetimi", "misafir protokolü", "kurumsal görünürlük",
+                 "saha uyum çalışması", "kalite güvence adımı",
+                 "kurumsal temsil", "iç iletişim çalışması", "operasyonel süreklilik"],
+    "giyim": ["kurumsal temsil", "marka temsili", "kurumsal görünürlük", "protokol gereği",
+              "misafir protokolü", "kurumsal itibar yönetimi",
+              "ilişki yönetimi", "networking faaliyeti"],
+}
+
+
+# ZORUNLULUK GEREKÇESİ <-> KATEGORİ UYUMU (2026-07-30). Talimat eskiden SABİT bir
+# menü veriyordu ("tek uygun seçenek oydu, acil ihtiyaçtı, başka yer/zaman yoktu,
+# iş bekleyemezdi") ve kategoriden bağımsızdı. Kullanıcı incelemesindeki vaka:
+#     'Oğulbaş Arslan Pansiyonu'dan kiraladık ... İŞ BEKLEYEMEZDİ, zorunda kaldık.'
+# Mantık TERS: acil iş neden GECELEMEYİ gerektirsin? Konaklamanın doğru çerçevesi
+# "iş uzadı, dönemedim"dir. Aynı menü kargo/taksi için doğru, konaklama için değil.
+#
+# Kalem kategorisine göre gerekçe iskeleti verilir; genel havuzla birleşir.
+# HAVUZ GENİŞLETİLDİ (2026-07-30, 2. tur): ilk sürümde kategori başına 2-4 girdi
+# vardı ve 48 manipulatiflik pilotta tekrar GÖRÜNÜR oldu -- "ekip sahada kaldı"
+# iki kez, "başka alternatif/tedarikçi yoktu" üç kez. 25k'da belirgin kalıp olurdu.
+ZORUNLULUK_GENEL = [
+    "tek uygun seçenek oydu", "başka yer ya da zaman yoktu", "erteleyecek durum yoktu",
+    "o an elde başka imkân yoktu", "işi durdurmamak için başka yol kalmamıştı",
+]
+ZORUNLULUK_GEREKCE: dict[str, list[str]] = {
+    "konaklama": ["iş planlanandan uzun sürdü, dönecek vakit kalmadı",
+                  "son görüşme geç bitti, o saatte yola çıkmak mümkün değildi",
+                  "ertesi sabah erkenden yerinde olmam gerekiyordu",
+                  "dönüş için uygun bir sefer kalmamıştı",
+                  "hava koşulları dönüşü riskli hale getirmişti",
+                  "program ertesi güne sarktı",
+                  "sahadaki iş bir günde bitmedi"],
+    "ulasim_bireysel": ["toplantıya yetişmem gerekiyordu",
+                        "o saatte toplu taşıma yoktu",
+                        "araç yolda kaldı, beklemek işi aksatacaktı",
+                        "belgelerin aynı gün ulaştırılması gerekiyordu",
+                        "randevu saati kaymaya müsait değildi",
+                        "sahaya ulaşımın başka yolu yoktu"],
+    "ulasim_hizmeti": ["sevkiyat söz verilen güne yetişmeliydi",
+                       "yük bekletilirse üretim duracaktı",
+                       "tek çıkan araç oydu",
+                       "gümrük süresi doluyordu",
+                       "müşteri teslim tarihini öne çekmişti",
+                       "soğuk zincir bekletmeye uygun değildi"],
+    "yemek_hizmeti": ["ekip sahada kaldı, yakında başka yer yoktu",
+                      "toplantı öğlene sarktı, ara verilemedi",
+                      "misafiri aç bekletemezdim",
+                      "mesai uzayınca ekip yerinde kaldı",
+                      "görüşme yemek saatine denk geldi",
+                      "çevrede açık tek yer orasıydı"],
+    "temel_gida": ["ofiste stok bitmişti, gün içinde tamamlanması gerekiyordu",
+                   "yakında açık başka yer yoktu",
+                   "misafir beklenirken hazırlık yapılması gerekiyordu",
+                   "ertesi güne bırakmak işi aksatacaktı"],
+    "teknoloji_ekipman": ["mevcut cihaz bozuldu ve iş durdu",
+                          "yedeği yoktu, aynı gün temin etmek zorundaydım",
+                          "arıza işi tamamen durdurmuştu",
+                          "servise vermek günler alacaktı",
+                          "teslim tarihine yetişmesi gerekiyordu"],
+    "yazilim_lisans": ["lisans süresi doldu ve sistem kilitlendi",
+                       "yenilemeyi bekletmek erişimi kesecekti",
+                       "güvenlik açığı acilen kapatılmalıydı",
+                       "ekip o gün çalışamaz hale gelmişti"],
+    "ofis_sarf_malzeme": ["stok tükenmişti, iş aksıyordu",
+                          "teslim tarihi yaklaşmıştı, beklemek mümkün değildi",
+                          "baskı işi aynı gün çıkacaktı",
+                          "sunum öncesi eksik tamamlanmalıydı"],
+    "ofis_mobilya": ["mevcutları kullanılamaz haldeydi",
+                     "yeni ekip aynı hafta başlıyordu",
+                     "taşınma tarihi öne alınmıştı",
+                     "çalışma alanı o hâliyle kullanılamıyordu"],
+    "danismanlik": ["mevzuat değişikliği süre tanımıyordu",
+                    "denetim tarihi yaklaşmıştı",
+                    "başvuru penceresi kapanmak üzereydi",
+                    "kurum içinde bu uzmanlık yoktu"],
+    "kisisel_bakim": ["sahada hijyen koşulu vardı",
+                      "denetim öncesi eksiklerin kapatılması gerekiyordu",
+                      "müşteri ziyareti aynı güne alınmıştı"],
+    "temizlik": ["denetim öncesi eksiklerin kapatılması gerekiyordu",
+                 "ortak alan kullanılamaz haldeydi",
+                 "ziyaret öncesi hazırlık yetiştirilmeliydi",
+                 "temizlik malzemesi gün ortasında bitmişti"],
+    "giyim": ["temsil gerektiren bir görev çıktı",
+              "sahada koruyucu kıyafet zorunluydu",
+              "etkinlik kıyafet kuralı getirmişti",
+              "görev aynı gün bildirilmişti"],
+}
+
+
+# MAĞDURİYET DALI (2026-07-30) -- kullanıcının istediği beşinci manipulatif dal.
+# Davranış: şirketin ödememesi gereken bir gideri MAĞDURİYET çerçevesine sığdırmak.
+#     'Müşteri toplantısına yetişmek için taksiye binmek ZORUNDA KALDIM.'
+#     'Görüşme sonrası hava çok yağışlıydı, EVE DÖNEMEDİM.'
+# `zorunluluk`tan FARKI: orada gerekçe İŞİN kendisidir (iş uzadı, sevkiyat
+# yetişmeliydi); burada gerekçe ÇALIŞANIN mağduriyetidir (mahsur kaldım, başıma
+# geldi). İkisi de kaçınılmazlık kurar ama özne farklı.
+#
+# KRİTİK KISIT (kullanıcının kendi tespiti, doğru): yalnız ANOMALİLİ faturada ve
+# yalnız çalışanın FARKINDA olabileceği türlerde açılır. Temiz faturada gerçek bir
+# mağduriyet `manipulatif` sayılırsa `onay_durumu` (docs/etiketler.md §13) haksız
+# 'red' verir -- etiketi gürültüye çevirirdi.
+MAGDURIYET_TURLERI = {"limit_asimi", "yasakli_kategori", "mukerrer_fis_yukleme"}
+
+MAGDURIYET_CERCEVELERI = [
+    "planlanan dönüş saatini kaçırdım, mahsur kaldım",
+    "hava koşulları yüzünden yolda kaldım",
+    "servis/araç gelmedi, kendi imkânımla halletmek zorunda kaldım",
+    "toplantı beklenenden uzun sürdü, aç kaldım",
+    "son dakika görev çıktı, hazırlıksız yakalandım",
+    "elimde başka seçenek kalmadığı için cebimden karşıladım",
+    "iş yerinde gerekli olan şey yoktu, ben tamamladım",
+    "sahada beklenmedik bir durumla karşılaştım",
+    "programda olmayan bir aksilik çıktı",
+    "kimse yardımcı olamadı, kendim çözmek durumunda kaldım",
+]
+
+
+def _zorunluluk_gerekcesi(baskin_kategori_ham: str) -> str:
+    """Kaleme UYAN bir kaçınılmazlık iskeleti. Haritada olmayan kategori genel
+    havuza düşer -- genel ifadeler her kalemle tutarlıdır."""
+    return random.choice(ZORUNLULUK_GEREKCE.get(baskin_kategori_ham, []) + ZORUNLULUK_GENEL)
+
+
+# Kategoriye özel havuz bu eşiğe ULAŞIYORSA jenerikler EKLENMEZ (2026-07-30, 2. tur).
+# Gerekçe pilottan: `KILIF_GENEL` havuz boyutunu korumak için her kategoriye
+# ekleniyordu ama düzeltmeye çalıştığım uyumsuzluğu geri getiriyordu --
+#     'Nasip et Kebap'tan ... PERFORMANS TAKİBİ çerçevesinde'
+#     'Sultanahmet Coşkun Hotel'den konaklama ... SÜREÇ İYİLEŞTİRME gereğiyle'
+#     'Öz Uğur Hipermarketleri'den ... VERİMLİLİK ÇALIŞMASI sürerken'
+# Kategoriye özel havuz zaten yeterliyse jeneriğe ihtiyaç yok; yalnız ince
+# havuzlarda (ulasim, ofis_sarf, teknoloji gibi 5 girdili) collapse'i önlemek
+# için ekleniyor.
+KILIF_OZEL_YETERLI_ESIK = 8
+
+
+def _kilif_havuzu(baskin_kategori_ham: str) -> list[str]:
+    """Kategoriye uygun kılıflar; havuz inceyse jeneriklerle desteklenir.
+    Haritada olmayan kategori (alkol/eğlence/tütün/kumar gibi yasaklılar) tüm
+    havuza düşer -- oralarda zaten `gizleme` dalı devrede ve kılıfı olay
+    havuzundan alıyor."""
+    ozel = KILIF_KATEGORI.get(baskin_kategori_ham)
+    if not ozel:
+        return MANIPULATIF_KILIF_HAVUZU
+    return ozel if len(ozel) >= KILIF_OZEL_YETERLI_ESIK else ozel + KILIF_GENEL
+
+
 # Olay benzeri kılıflar hem aidiyet hem eşzamanlılık alabilir (bkz. OLAY_CERCEVELERI).
 KILIF_CERCEVELERI = [
     "{kilif} kapsamında", "{kilif} gereği", "{kilif} çerçevesinde", "{kilif} doğrultusunda",
@@ -822,10 +1375,15 @@ def kilif_notu_uret(baskin_kategori_ham: str) -> tuple[str, dict]:
     sabit literal örnek (eski 'stratejik değerlendirme toplantısı') birebir
     kopyalanıyordu; havuz + çerçeve kombinasyonu aynı yönlendirmeyi tekrar üretmeden verir."""
     if random.random() < 0.25:
+        # Gider-kalemi dili kategoriden BAĞIMSIZ kalır: bunlar muhasebe etiketi,
+        # hangi kalem olursa olsun aynı şekilde kullanılır ('temsil gideri').
         kilif = random.choice(MANIPULATIF_KILIF_KALEM)
         cerceveli = random.choice(KILIF_CERCEVELERI_KALEM).format(kilif=kilif)
     else:
-        kilif = random.choice(MANIPULATIF_KILIF_HAVUZU)
+        # Kategoriye KOŞULLU seçim (bkz. KILIF_KATEGORI). Parametre zaten
+        # geliyordu ama kullanılmıyordu -- 'hamburger + yönetim kademesi
+        # çalışması' tipi alakasız eşleşmelerin sebebi buydu.
+        kilif = random.choice(_kilif_havuzu(baskin_kategori_ham))
         cerceveli = random.choice(KILIF_CERCEVELERI).format(kilif=kilif)
     notu = (f" KILIF: harcamayı '{cerceveli}' gibi büyük bir kurumsal gerekçeye yasla; "
             f"gerçekte sıradan bir alışveriş olduğunu belli etme.")
@@ -940,11 +1498,34 @@ def olay_sec(departman: str | None, baskin_kategori_ham: str) -> tuple[str, str]
     return olcek, random.choice(ozel * 2 + genel if ozel else genel)
 
 
+# Olay (BAĞLAM) enjeksiyon olasılığı.
+#
+# DENENDİ VE GERİ ALINDI (2026-07-30): `yeterli` için %50 -> %100 çıkarıldı,
+# hipotez "bağlam verilmeyen yarıda model amacı icat edemeyip KALEMİ TEKRAR
+# EDİYOR" idi ('Müşteri konaklaması için pansiyon konaklama aldım'). Aynı 200
+# kayıtta tek değişken olarak ölçüldü:
+#     totoloji  %10,2 -> %11,2   (DEĞİŞMEDİ)
+#     dist-1    0,486 -> 0,473   (düştü)
+# Hipotez YANLIŞ çıktı: olay havuzundan kök taşıyan `yeterli` çıktıları enjeksiyon
+# %50'yken ZATEN %89,8'di. Model bağlamdan yoksun değil; kusur, amacın bazen
+# kalemin YANKISI olması ve daha çok bağlam vermek yankıyı durdurmuyor
+# ('Eğitim programı konaklaması için ... konaklama ücreti' -- gerçek olay VAR,
+# tekrar yine var).
+#
+# %50 KASITLI: her `yeterli` bağlam cümlesiyle gelirse şablon imzası doğar ve
+# aşağı akıştaki model kategoriyi içerikten değil kalıptan öğrenir (leakage).
+# Doğru kaldıraç bağlam ORANI değil, amacın kalemi tekrarlamasını doğrudan
+# yasaklayan talimat (bkz. `yeterli` talimatındaki "fişe bakarak anlaşılamayacak"
+# kuralı).
+OLAY_OLASILIGI = 0.5
+
+
 def baglam_notu_uret(persona: dict, baskin_ham: str, manipulatif_dal: str | None = None) -> tuple[str, dict]:
     """Prompt'a eklenecek BAĞLAM cümlesi + meta. Boş string dönebilir (bilinçli).
 
-    ~%50 olasılık KASITLI: her `yeterli` "X birimindesin" diye başlarsa şablon imzası
-    doğar ve aşağı akıştaki model kategoriyi içerikten değil kalıptan öğrenir (leakage).
+    ~%50 olasılık KASITLI: her `yeterli` bağlam cümlesiyle başlarsa şablon imzası
+    doğar ve aşağı akıştaki model kategoriyi içerikten değil kalıptan öğrenir
+    (leakage). %100 denendi ve ÖLÇÜMLE geri alındı -- bkz. OLAY_OLASILIGI.
 
     manipulatif_dal verilirse yalnız 'gizleme'/'zorunluluk' dallarına bağlam verilir --
     o faturalar ANOMALİLİ olduğu için `onay_durumu` metne bakmadan zaten 'onaylanmadi';
@@ -954,7 +1535,7 @@ def baglam_notu_uret(persona: dict, baskin_ham: str, manipulatif_dal: str | None
     """
     if manipulatif_dal is not None and manipulatif_dal not in ("gizleme", "zorunluluk"):
         return "", {}
-    if random.random() >= 0.5:
+    if random.random() >= OLAY_OLASILIGI:
         return "", {}
     dep = ROL_DEPARTMAN.get(persona.get("rol", ""))
     if not dep:
@@ -995,6 +1576,21 @@ KATEGORI_SICAKLIK = {
     "manipulatif": 1.1,
     "ai_uretimi": 1.1,
 }
+
+# Sıcaklık TAVANI (None = kapalı, tablo aynen kullanılır).
+#
+# NEDEN VAR: yukarıdaki 1.1 değerleri Ollama'da `min_p=0.1` GÜVENLİK AĞIYLA
+# BİRLİKTE kalibre edildi -- min_p yüksek sıcaklıkta aday kümesinin şişmesini
+# engelliyor (bkz. ollama_cagir yorumu, arXiv:2407.01082). OpenAI-uyumlu
+# arayüzde (Groq) `min_p` YOKTUR, yani bulut yolunda 1.1 ÇIPLAK çalışıyor.
+# Llama 3.3 pilotunda bunun izleri görüldü (yersiz -mIş kipi, firma_ek_hatasi).
+#
+# Tavan yalnız YÜKSEK olanları kırpar; `yeterli` 0.6 zaten altında kalır, yani
+# tek değişken izole edilmiş olur (A/B testi için).
+SICAKLIK_TAVANI: float | None = None
+
+# yeterli talimatindaki SADELESTIRME ORNEGI verilsin mi (bkz. prompt_olustur).
+SADE_ORNEK_VER: bool = True
 
 
 def baskin_kategori(kalemler: list[dict]) -> str:
@@ -1075,15 +1671,46 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
         # Sadeleştirme örneği faturanın KENDİ kaleminden kurulur (sabit örnek
         # veriliyorken 8B onu alakasız fişlerin metnine taşıyordu).
         ham_ad = max((k["aciklama"] for k in fatura["kalemler"]), key=len, default="")
-        sade_ad = kalem_adi_sadelestir(ham_ad)
-        sade_ornek = (f"('{ham_ad}' -> '{sade_ad}' gibi)"
-                      if sade_ad and sade_ad != ham_ad.lower()
-                      else "('F Saff Sıvı El Sabunu 500Ml' -> 'el sabunu' gibi)")
+        if SADE_ORNEK_VER:
+            sade_ad = kalem_adi_sadelestir(ham_ad)
+            sade_ornek = (f"('{ham_ad}' -> '{sade_ad}' gibi)"
+                          if sade_ad and sade_ad != ham_ad.lower()
+                          else "('F Saff Sıvı El Sabunu 500Ml' -> 'el sabunu' gibi)")
+        else:
+            # ÖRNEKSİZ mod: sadeleştirmeyi modelin kendisi yapar.
+            #
+            # NEDEN GEREKTİ: `kalem_adi_sadelestir` market tipi adlarda SON iki
+            # kelimeyi alıyor, ama o adlarda son kısım KOKU/VARYANT oluyor
+            # ('... Sabun 5'li ÇİÇEK BUKETİ 375Gr' -> 'cicek buketi'). Örnek
+            # talimata birebir girdiği için model yanlış kelimeyi ÖĞRENİYORDU --
+            # pilotta "çiçek aldım" çıktısının kaynağı buydu (ölçüldü: 20k
+            # faturada kalemlerin %3,6'sı koku/varyant ile biten sadeleştirme
+            # üretiyor). 8B'de bu koltuk değneği gerekliydi; daha büyük bir
+            # modelde yükten ibaret olabilir -- bu bayrak onu ölçmek için.
+            sade_ornek = "(marka/ölçü/koku detayını atıp ürünün kendisini yaz)"
         talimat = (
             f"KARAKTER: YETERLİ çalışan. Harcamanın İŞ AMACINI (kiminle, ne için) net ve kendinden emin "
             f"söyle - saklayacak bir şeyin yok. YAPI: {iskele} "
             f"Fişteki gerçek kalemi ÇALIŞAN gibi SADELEŞTİREREK an {sade_ornek}; "
-            f"boyut/miktar/model detayı yazma, kategori adını ('{baskin}') amaç yerine kullanma. "
+            # PEMBE FİL vs YÜK TAŞIYAN YASAK (2026-07-30, İKİ TURDA ölçüldü):
+            # 1. tur: buradaki yasak kategori adını GÖSTERİYORDU ('{baskin}').
+            #    Pembe fil sanıp "ürünün TÜRÜNÜ amaç yerine koyma"ya çevirdim.
+            # 2. tur (pilot): enum_sizinti `yeterli`de %3,0 -> %10,2'ye ÇIKTI.
+            #    "tür" kelimesi modele "sistem kategori etiketi"ni anlatmıyormuş;
+            #    açık yasak YÜK TAŞIYORMUŞ.
+            # Sonuç: yasak AÇIK haliyle geri, ama literal kategori adı GÖSTERİLMEDEN
+            # -- ilkenin evrensel olmadığı, kısıtın NET olması gerektiği ders.
+            f"boyut/miktar/model detayı yazma. Amaç olarak sistemin sınıflandırma "
+            f"etiketini yazma (masraf sistemindeki kategori adları); gerçek sebebi söyle. "
+            # AMAÇ TOTOLOJİSİ (2026-07-30, ölçülen %10,2): model amaç yerine kalemin
+            # adını tekrarlıyordu -- 'Müşteri KONAKLAMASI için pansiyon KONAKLAMA
+            # aldım', 'Havalimanı TRANSFERİ için ... TRANSFER hizmeti'. Bağlam
+            # enjeksiyonunu %100'e çıkarmak İŞE YARAMADI (bkz. OLAY_OLASILIGI):
+            # model bağlamdan yoksun değil, yankıyı üstüne ekliyor. Bu yüzden
+            # kısıt DOĞRUDAN veriliyor. Ölçüt `yeterli`nin tanımıyla aynı: fişte
+            # zaten GÖRÜNEN (firma, kalem) değil GÖRÜNMEYEN (neden) anlatılmalı.
+            f"AMAÇ, fişe bakarak anlaşılamayacak bir bilgi olmalı: aldığın şeyin "
+            f"adını ya da türünü sebep diye gösterme, onu neyin gerektirdiğini söyle. "
             f"Birinci tekil şahıs ve GEÇMİŞ zaman (harcama olmuş bitmiş -- 'alacağım' değil 'aldım'); "
             f"edilgen ya da 3. şahıs ('alındı', 'aldı') KULLANMA. Üslup: {uslup}. "
             f"Bu bir YETERSİZ not DEĞİL: amacı belirsiz bırakma. Bu bir MANİPÜLATİF not da DEĞİL: gerçek "
@@ -1098,7 +1725,18 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
 
     elif kategori == "yetersiz":
         uslup = random.choice(YETERSIZ_USLUP_IPUCLARI)
-        baskin_yetersiz = baskin_kategori(fatura["kalemler"]).replace("_", " ")
+        # PEMBE FİL DÜZELTMESİ (2026-07-30): burada eskiden kategori adı
+        # GÖSTERİLİP yasaklanıyordu ("Kategori adını ('ofis mobilya') olduğu gibi
+        # yazma") -- yasaklanan ifadeyi adıyla anmak onu ÜRETTİRİYOR
+        # (docs/faz-b-prompt.md §6, ölçülmüş). Yön artık POZİTİF: yasak dize hiç
+        # gösterilmez, yerine günlük dildeki genel ad ÖNERİLİR.
+        #
+        # COLLAPSE RİSKİ DÜŞÜNÜLDÜ: genel ad SABİT bir kalıp değil, faturanın
+        # kategorisine göre 13 farklı değer alıyor -- §8'in "sabit kalıp collapse
+        # üretir, havuz üretmez" ilkesine uygun. Ayrıca zorunlu değil, talimattaki
+        # üç seçenekten (kuru öbek / umursamaz söz / genel ad) biri.
+        _genel_ad = _KATEGORI_GENEL_AD.get(baskin_kategori(fatura["kalemler"]))
+        genel_ipucu = f" (ör. '{_genel_ad}')" if _genel_ad else ""
         ornekler = ", ".join(f"'{o}'" for o in random.sample(YETERSIZ_ORNEK_HAVUZ, 2))
         talimat = (
             f"KARAKTER: YETERSİZ çalışan. Baştan savma, muğlak, geçiştirmelik bir not yaz. İşi kiminle/neden "
@@ -1107,7 +1745,14 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
             f"(birebir kopyalama, tarzını yakala). FİİL kullanacaksan BİRİNCİ TEKİL ŞAHIS kullan "
             f"('aldım', 'ödedim'); 'alındı', 'aldılar', 'karşılandı' gibi edilgen ya da 3. şahıs YAZMA "
             f"(üşengeçsin ama notu sen yazıyorsun). İstersen hiç fiil kullanma, kuru bir öbek bırak. "
-            f"Kategori adını ('{baskin_yetersiz}') olduğu gibi yazma. "
+            # 'nereye/hangi birime alındığını yazma' EKLENDI ve GERI ALINDI: (a) hemen
+            # asagidaki "Firma: ... (istersen kullanma)" ile CELISIYORDU (§6: celiskili
+            # talimatta 8B ortalama alip karakteri bozuyor), (b) 'birim' kavramini
+            # prompt'a sokmak yeni bir pembe fil. Amac zaten karsilaniyor: talimatin
+            # basindaki "kiminle/neden ASLA soyleme" amaci gizliyor, genel ad onerisi
+            # de 'ofis mobilya'daki NEREYE bilgisini dusuruyor.
+            f"Ürün türünü anacaksan sınıflandırma etiketi gibi değil, günlük dilde "
+            f"nasıl söylüyorsan öyle an{genel_ipucu}. "
             f"Bu bir MANİPÜLATİF not DEĞİL: kurnaz gerekçe uydurma, sahte "
             f"kılıf yok. Firma: {firma_kisa} (istersen kullanma)."
         )
@@ -1139,7 +1784,10 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
         elif "is_kolu_kategori_uyumsuzlugu" in anomali_turleri:
             dal, gizlenecek = "gizleme", aykiri_kalem_bul(fatura["kalemler"])
         elif "limit_asimi" in anomali_turleri:
-            dal, gizlenecek = "zorunluluk", None
+            # MAĞDURİYET, zorunluluk'un KARDEŞ dalı: ikisi de kaçınılmazlık kurar
+            # ama öznesi farklı (iş uzadı ↔ ben mahsur kaldım). %30'u mağduriyete
+            # ayrılıyor -- zorunluluk baskın kalsın, ama tek tip olmasın.
+            dal, gizlenecek = ("magduriyet" if random.random() < 0.30 else "zorunluluk"), None
         elif "mukerrer_fis_yukleme" in anomali_turleri:
             dal, gizlenecek = "kurnaz", None
         else:
@@ -1170,6 +1818,21 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
                 f"'karşılandı', 'gerçekleştirildi' gibi edilgen/3. şahıs kalıp KULLANMA. "
                 f"Satıcı: {firma_kisa}."
             )
+        elif dal == "magduriyet":
+            # MAĞDURİYET dalı: kaçınılmazlık ÇALIŞANIN başına gelenden kurulur
+            # (zorunluluk'ta İŞTEN kurulur). Şirketin ödememesi gereken gideri
+            # "mağdur oldum, mecbur kaldım" çerçevesine sığdırır.
+            # Vurgu YOK: mağduriyet anlatısı ısrarla birleşince bariz dala benzer.
+            talimat = (
+                f"KARAKTER: MANİPÜLATİF çalışan. Bu masraf aslında şirketin karşılaması gereken bir gider "
+                f"DEĞİL ve bunu biliyorsun. Ama kendini MAĞDUR gibi anlat: {random.choice(MAGDURIYET_CERCEVELERI)} "
+                f"-- bu yüzden bu masrafı yapmak zorunda kaldığını söyle. Tutardan, limitten, kuraldan HİÇ "
+                f"söz etme; şikâyet etme, sadece başına geleni sakin sakin anlat ki karşı taraf sana hak versin. "
+                f"Bu bir YETERLİ not DEĞİL: gerçek bir iş amacı anlatmıyorsun, kendi mağduriyetini anlatıyorsun. "
+                f"Abartılı vurgu ya da savunmacı ısrar KULLANMA. Birinci tekil şahıs ve GEÇMİŞ zaman; "
+                f"'kalındı', 'yapıldı' gibi edilgen/3. şahıs kalıp YAZMA ('kaldım', 'yaptım' de). "
+                f"Satıcı: {firma_kisa}."
+            )
         elif dal == "zorunluluk":
             # ZORUNLULUK dalı (limit_asimi): çalışan masrafın fazla olduğunu BİLİR.
             # Tutarı hiç anmadan kaçınılmazlık kurar. Abartılı vurgu YOK -- olursa
@@ -1177,8 +1840,12 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
             talimat = (
                 f"KARAKTER: MANİPÜLATİF çalışan. Bu masraf şirketin uygun gördüğünden PAHALIYA geldi ve bunu "
                 f"biliyorsun. Tutardan, limitten, fiyattan HİÇ söz etme; bunun yerine harcamayı KAÇINILMAZ "
-                f"göster: tek uygun seçenek oydu, acil ihtiyaçtı, başka yer/zaman yoktu, iş bekleyemezdi gibi "
-                f"bir zorunluluk kur. Sakin ve kendinden emin yaz; abartılı vurgu ya da savunmacı ısrar "
+                # Gerekçe artık KALEME UYAN bir iskeletten geliyor (bkz.
+                # ZORUNLULUK_GEREKCE). Eski sabit menü kategoriden bağımsızdı ve
+                # ters mantık üretiyordu: 'iş bekleyemezdi' kargo için doğru,
+                # KONAKLAMA için saçma ('acil iş var, o yüzden geceledim').
+                f"göster; zorunluluğu şuna yasla: {_zorunluluk_gerekcesi(baskin_ham)}. "
+                f"Bunu kendi cümlenle kur. Sakin ve kendinden emin yaz; abartılı vurgu ya da savunmacı ısrar "
                 f"KULLANMA. Bu bir YETERLİ not DEĞİL: gerçek gerekçeyi değil, kendini aklayan bir zorunluluk "
                 f"hikâyesi anlatıyorsun. Birinci tekil şahıs; 'zorunda kalındı', 'alındı' gibi edilgen/3. şahıs "
                 f"kalıp YAZMA ('kalmadım', 'aldım' de). "
@@ -1426,6 +2093,17 @@ def ollama_cagir(
     num_ctx: int = 2048,
     bilgi: dict | None = None,
 ) -> str:
+    # OpenAI-uyumlu sağlayıcı seçiliyse o yola dallan (bkz. SAĞLAYICI KATMANI).
+    # Aşağıdaki Ollama gövdesi olduğu gibi korunur.
+    # 'vllm' de BURAYA girmek zorunda: kendi vLLM sunucun da OpenAI-uyumlu.
+    # Koşul yalnız "groq" iken vllm sessizce Ollama gövdesine düşüyor ve
+    # /api/generate'e gidip 404 alıyordu (Kaggle koşusunda 500 fatura kaybı).
+    if _SAGLAYICI in ("groq", "vllm"):
+        return _groq_cagir(
+            system_prompt, user_prompt, model, host, num_predict,
+            temperature, seed, stop, ham, bilgi, min_p,
+        )
+
     profil = model_profili(model)
     istek_govdesi: dict = {
         "model": model,
@@ -1602,6 +2280,23 @@ DUZELTME_NOTLARI = {
         "Bu kez '{vurgu}' gibi abartılı bir vurguyu MUTLAKA ekle (cümlenin doğal bir yerine) ve "
         "harcamayı gereğinden fazla haklı çıkar."
     ),
+    # PEMBE FİL: bu notta ısrar kelimelerini ÖRNEKLEYEREK sayma. Ölçüldü
+    # (docs/faz-b-prompt.md §6): yasaklanan ifadeyi adıyla anmak onu ÜRETTİRİYOR --
+    # "'Belirtilen fiş' kalıbını tekrarlama" denince 8 çıktının 4'ü tam o ifadeyle
+    # başlamıştı. Kural bu yüzden SAYI üzerinden ve POZİTİF kurulur.
+    "vurgu_fazlasi": (
+        "ÖNEMLİ DÜZELTME: Az önceki cevabın kendini birden çok kez savundu; ısrar üst üste "
+        "bindiği için yapmacık durdu. Gerçek bir çalışan kendini BİR KEZ savunur. Bu kez "
+        "ısrarını cümlede TEK BİR yerde bırak, geri kalanı sakin ve kurumsal olsun."
+    ),
+    # PEMBE FİL: fişte olmayan temayı ADIYLA anma ("çerezden bahsetme" deme),
+    # yoksa model tam onu yazar (docs/faz-b-prompt.md §6). Yön POZİTİF verilir.
+    "tema_halusinasyonu": (
+        "ÖNEMLİ DÜZELTME: Az önceki cevabın fişte olmayan bir harcamadan söz etti. "
+        "Kısa ve muğlak kalman SORUN DEĞİL -- istenen bu. Ama bahsettiğin şey fişteki "
+        "alışverişle uyuşmalı: ya fişte gerçekten olan şeyi sade bir dille an, ya da "
+        "hiç ürün/tür anma ve tamamen genel kal."
+    ),
     "karakter_kirilmasi": (
         "ÖNEMLİ DÜZELTME: Az önceki cevabın kılıfı bozdu; harcamanın aykırı/şüpheli olduğunu "
         "ya da prosedür/kural gerektiğini ima etti. Bu kez tam tersi: kendinden emin, harcamayı "
@@ -1616,10 +2311,16 @@ DUZELTME_NOTLARI = {
         "yazmak yetmez). Bu kez hangi iş bağlamında olduğunu somut belirt: toplantı, müşteri "
         "ziyareti, saha işi, mesai, randevuya yetişme gibi. Kalem ve firma adı isteğe bağlı."
     ),
+    # PEMBE FİL (2026-07-30): bu not eskiden ÜÇ kategori adını örnekliyordu
+    # ('kisisel_bakim', 'yemek hizmeti', 'teknoloji ekipman') -- hem de retry'da,
+    # yani modelin en çok tutunduğu yerde. docs/durum-2026-07-29.md
+    # "enum_sizinti'nin bir kısmı bizim eserimiz" derken kaynağı prompt talimatı
+    # sanıyordu; asıl kaynak büyük olasılıkla buydu. Yasak dizeler kaldırıldı,
+    # POZİTİF yön (ürünün kendi adı) korundu -- o kısım zaten doğruydu.
     "enum_sizinti": (
-        "ÖNEMLİ DÜZELTME: Az önceki cevabında SİSTEM KATEGORİ ADI geçti (ör. 'kisisel_bakim', "
-        "'yemek hizmeti', 'teknoloji ekipman'). Gerçek bir çalışan kategori adı değil ÜRÜNÜN "
-        "kendi adını yazar ('öğle yemeği', 'tv askısı', 'şampuan'). Bu kez kategori adını hiç kullanma."
+        "ÖNEMLİ DÜZELTME: Az önceki cevabında sistemin sınıflandırma etiketi geçti. "
+        "Gerçek bir çalışan öyle yazmaz, ürünün günlük dildeki adını yazar "
+        "('öğle yemeği', 'tv askısı', 'şampuan'). Bu kez ürünü kendi adıyla an."
     ),
     # T1 pilotunda (2026-07-28) bu not YETMEDİ: model açıklamanın sonuna kendi
     # yaptığını anlatan bir not ekledi ve GROUND-TRUTH kategori adını metne taşıdı
@@ -1779,6 +2480,21 @@ def _vurgu_var_mi(metin: str, vurgu: str | None = None) -> bool:
     return any(anahtar in n for anahtar in _VURGU_ANAHTARLARI)
 
 
+def _vurgu_sayisi(metin: str) -> int:
+    """Metinde kaç FARKLI abartılı ısrar işareti geçiyor?
+
+    `vurgu_eksik`in eşi olan `vurgu_fazlasi` için (2026-07-30). Gerekçe kullanıcı
+    incelemesinden: "eksiksiz biçimde ... yüzde yüz işle alakalıdır ... hiçbir
+    eksiklik yok" -- üç ısrar aynı metinde, insan gözüyle yapmacık duruyor.
+    Beğenilen manipulatif örneklerin ortak özelliği ısrarın TEK olması.
+
+    Sayım FARKLI anahtar üzerinden: aynı ifadenin tekrarı değil, üst üste binen
+    ayrı ısrar kalıpları hedefleniyor. Ölçüldü (200 kayıtlık pilot): manipulatif
+    çıktıların %11'i (4/35) 2+ işaret taşıyor -- kural dar, retry'ı patlatmaz."""
+    n = _tr_normalize(metin)
+    return sum(1 for anahtar in _VURGU_ANAHTARLARI if anahtar in n)
+
+
 # --- Faz 2: ek kural-tabanlı ihlal denetimleri (judge yerine) --------------
 
 def _enum_sizinti_var_mi(metin: str, kalemler: list[dict]) -> bool:
@@ -1835,6 +2551,64 @@ def _karakter_kirilmasi_mi(metin: str) -> bool:
 _YEMEK_TEMA = ("yemek", "yemegi", "yedik", "kahvalti", "restoran")
 _YEMEK_KATEGORILERI = {"yemek_hizmeti", "konaklama", "temel_gida"}
 
+# TEMA -> o temayi MESRU kilan harcama kategorileri (2026-07-30).
+# `_yeterli_halusinasyon_mi`nin yalnizca YEMEK ekseninde yaptigi denetimin
+# genellestirilmis hali; `yetersiz` icin de kullanilir (bkz. _tema_halusinasyonu_mi).
+#
+# TASARIM SINIRI (kullanici, 2026-07-30): `yetersiz`in kusuru AMACIN yoklugudur,
+# kalemin yoklugu DEGIL. "mobilya alimi", "kirtasiye aldim", "genel gider",
+# "aldim iste" hepsi GECERLI yetersiz ornekleridir ve bu kural onlara
+# DOKUNMAMALIDIR. Yakalanan tek sey: fiste KARSILIGI OLMAYAN bir temayi anmak
+# ('cerezli alisveris' -> fiste deodorant + sabun var).
+#
+# Kelime secimi DAR: kisa/cok anlamli kokler (masa -> masaj, kalem -> ...)
+# bilerek DISARIDA. Yanlis pozitif, kacirilan halusinasyondan pahalidir --
+# `yetersiz` zaten mugllak olmak ZORUNDA, onu ihlalle cezalandirmak kategoriyi bozar.
+_TEMA_KATEGORI: list[tuple[str, set[str]]] = [
+    (r"\b(yemek|yemegi|yedik|kahvalti|ogle yemegi|aksam yemegi|restoran|cerez|"
+     r"atistirmalik|icecek|kahve mola)", {"yemek_hizmeti", "temel_gida", "konaklama"}),
+    (r"\b(temizlik|deterjan|hijyen)", {"temizlik"}),
+    (r"\b(kirtasiye|toner|fotokopi)", {"ofis_sarf_malzeme"}),
+    (r"\b(mobilya|koltuk takimi)", {"ofis_mobilya"}),
+    (r"\b(konaklama|otelde|gecelik|pansiyon)", {"konaklama"}),
+    (r"\b(ulasim|taksi|yakit|akaryakit|ucak bileti|otobus bileti)",
+     {"ulasim_hizmeti", "ulasim_bireysel"}),
+    (r"\b(yazilim|lisans|abonelik)", {"yazilim_lisans"}),
+    (r"\b(bilgisayar|donanim|teknoloji ekipman)", {"teknoloji_ekipman"}),
+    (r"\b(danismanlik|musavirlik)", {"danismanlik"}),
+    (r"\b(giyim|kiyafet)", {"giyim"}),
+    (r"\b(kozmetik|sampuan)", {"kisisel_bakim"}),
+]
+_TEMA_DESENLERI = [(re.compile(d), kats) for d, kats in _TEMA_KATEGORI]
+
+# Kategori enum'unun GUNLUK DILDEKI karsiligi (2026-07-30). `yetersiz` icin:
+# "ofis mobilya alimi" hem enum sizintisidir hem de urunun NEREYE alindigi
+# bilgisini tasir -- oysa `yetersiz`in isi bu bilgiyi VERMEMEK. "mobilya aldim"
+# ikisini birden cozer.
+#
+# MEKANIK BIR KURAL DEGIL (ilk kelimeyi atmak) -- her kategori icin tek tek
+# secildi, cunku mekanik yol dort yerde bozuluyordu:
+#   ulasim_hizmeti + ulasim_bireysel -> ikisi de "ulasim"a duserdi (ayirt edilemez)
+#   teknoloji_ekipman -> "teknoloji" ayni zamanda bir IsKolu adi
+#   kisisel_bakim     -> "bakim" cok anlamli (arac bakimi)
+#   tutun_urunleri    -> yasakli kategori, genel ad ONERILMEZ
+# Haritada OLMAYAN kategori icin ipucu hic verilmez (yasakli dortlu bilerek yok).
+_KATEGORI_GENEL_AD: dict[str, str] = {
+    "yemek_hizmeti": "yemek",
+    "temel_gida": "market alışverişi",
+    "ulasim_hizmeti": "nakliye",
+    "ulasim_bireysel": "ulaşım",
+    "konaklama": "konaklama",
+    "ofis_sarf_malzeme": "kırtasiye",
+    "ofis_mobilya": "mobilya",
+    "teknoloji_ekipman": "ekipman",
+    "yazilim_lisans": "lisans",
+    "danismanlik": "danışmanlık",
+    "giyim": "giyim",
+    "kisisel_bakim": "bakım ürünü",
+    "temizlik": "temizlik malzemesi",
+}
+
 
 def _fatura_kaynak_kelimeleri(fatura: dict) -> list[str]:
     """Faturadan gelen (firma adı + kalem adları) normalize kelimeler."""
@@ -1858,6 +2632,28 @@ def _yeterli_halusinasyon_mi(metin: str, fatura: dict) -> bool:
     if not any(t in n for t in _YEMEK_TEMA):
         return False
     return not any(k["harcama_kategorisi"] in _YEMEK_KATEGORILERI for k in fatura["kalemler"])
+
+
+def _tema_halusinasyonu_mi(metin: str, fatura: dict) -> bool:
+    """Metin, fişte KARŞILIĞI OLMAYAN bir harcama temasını anıyor mu?
+
+    Ölçülen vaka (2026-07-30 pilotu): fişte 'Miss hair'den deodorant + sabun
+    (kisisel_bakim) varken model 'çerezli alışveriş' yazdı ve HİÇBİR ihlal almadı --
+    `_yeterli_halusinasyon_mi` yalnız kategori=='yeterli'de çağrılıyordu.
+
+    KALEM ADINI ANMAK İHLAL DEĞİLDİR: firma ve kalem kelimeleri taramadan
+    düşülür (aynı `_yeterli_halusinasyon_mi` mantığı), yani fişteki ürünü doğru
+    anan bir metin buradan geçer. Yakalanan tek şey, fişte dayanağı olmayan
+    bir tema. Hiç tema anmayan muğlak metinler ('genel gider', 'aldım işte')
+    de geçer -- `yetersiz`in tanımı zaten budur."""
+    n = _tr_normalize(metin)
+    for kel in _fatura_kaynak_kelimeleri(fatura):
+        n = n.replace(kel, " ")
+    mevcut = {k["harcama_kategorisi"] for k in fatura["kalemler"]}
+    for desen, kategoriler in _TEMA_DESENLERI:
+        if desen.search(n) and not (kategoriler & mevcut):
+            return True
+    return False
 
 
 def _yeterli_dayanaksiz_mi(metin: str, fatura: dict) -> bool:
@@ -2022,6 +2818,12 @@ def ihlalleri_bul(metin: str, kategori: str, fatura: dict, meta: dict | None = N
         # "aşırı haklı çıkarma" dalında (meta["vurgu"] varsa) zorunlu vurgu var mı?
         if meta.get("vurgu") and not _vurgu_var_mi(metin, meta.get("vurgu")):
             ihlaller.append("vurgu_eksik")
+        # ...ve tersi: ISRAR UST USTE BINMESIN (2026-07-30). meta["vurgu"] KOSULU
+        # YOK -- bariz dalda vurgu zorunlu ama 'bir tane' demek gerekiyor, kurnaz/
+        # gizleme/zorunluluk dallarinda ise zaten hic olmamali, ikisinde de
+        # "en fazla 1" dogru sinir.
+        elif _vurgu_sayisi(metin) > 1:
+            ihlaller.append("vurgu_fazlasi")
         # Faz 2: kılıfı bozup ihlali itiraf/prosedür anlatma -> manipülatif niyeti bozar.
         if _karakter_kirilmasi_mi(metin):
             ihlaller.append("karakter_kirilmasi")
@@ -2039,6 +2841,18 @@ def ihlalleri_bul(metin: str, kategori: str, fatura: dict, meta: dict | None = N
     # Faz 2: yeterli halüsinasyonu (fişte olmayan 'yemek/ağırlama' teması uydurma).
     if kategori == "yeterli" and _yeterli_halusinasyon_mi(metin, fatura):
         ihlaller.append("yeterli_halusinasyon")
+
+    # `yetersiz`de tema halusinasyonu (2026-07-30). YALNIZ bu kategoride --
+    # `yeterli`ye UYGULANMADI ve gerekcesi olculdu: yeterli'nin AMAC CUMLESI
+    # mesru olarak baska temalara atif yapar ("sahada hijyen ihtiyaci icin sabun
+    # aldim", "kiyafetleri duzenlemek icin"), kural "X aldim" ile "X ICIN aldim"i
+    # ayiramiyor -> 200 kayitlik pilotta 7 flag'in 5'i YANLIS POZITIFTI (isabet
+    # %29). `yetersiz`de amac cumlesi TANIMI GEREGI yok, o yuzden tema kelimesi
+    # neredeyse her zaman iddia edilen bir alimdir -> isabet 1/1.
+    # manipulatif'e de UYGULANMAZ: `gizleme` dalinin isi zaten kalemi anmadan
+    # baska bir seyden bahsetmektir.
+    if kategori == "yetersiz" and _tema_halusinasyonu_mi(metin, fatura):
+        ihlaller.append("tema_halusinasyonu")
 
     # Faz 3: yeterli dayanak kontrolü (gerçek kalem/firma/iş-amacı çıpası yoksa muğlak).
     if kategori == "yeterli" and _yeterli_dayanaksiz_mi(metin, fatura):
@@ -2332,6 +3146,8 @@ def tek_fatura_isleme(fatura, etiket, model, host, keep_alive: str | int | None 
     # yeterli, fişteki gerçek kalemlere DAYANMALI -> düşük temp + düşük min_p uydurmayı
     # azaltır. Diğerleri çeşitlilik için yüksek temp'te (1.1) kalır, min_p 0.1 güvenlik ağı.
     taban_sicaklik = KATEGORI_SICAKLIK.get(kategori, 0.9)
+    if SICAKLIK_TAVANI is not None:
+        taban_sicaklik = min(taban_sicaklik, SICAKLIK_TAVANI)
     min_p = 0.05 if kategori == "yeterli" else 0.1
 
     # Faz 4: collapse-eğilimli kategoriler VS akışına gider.

@@ -17,8 +17,10 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import aciklama_uretim_core as core
 from aciklama_uretim_core import (
     OLLAMA_HOST_VARSAYILAN,
+    saglayici_ayarla,
     MODEL_VARSAYILAN,
     KATEGORILER,
     tek_fatura_isleme,
@@ -92,6 +94,14 @@ def main():
     parser.add_argument("--workers", type=int, default=2, help="Paralel istek sayısı (16GB RAM için 2 önerilir; OLLAMA_NUM_PARALLEL'dan büyük olması FAYDASIZ)")
     parser.add_argument("--model", default=MODEL_VARSAYILAN)
     parser.add_argument("--host", default=OLLAMA_HOST_VARSAYILAN)
+    parser.add_argument(
+        "--saglayici", choices=["ollama", "groq", "vllm"], default="ollama",
+        help="Uretim saglayicisi. 'groq': OpenAI-uyumlu bulut API (GROQ_API_KEY .env'den okunur), "
+             "host otomatik ayarlanir, istemci tarafinda 30 istek/dk kota sinirlayici devreye girer.")
+    parser.add_argument("--istek-dk", type=int, default=25,
+                        help="[groq] Dakikada izin verilen istek. Ucretsiz katmanda istek siniri 30/dk "
+                             "ama TOKEN siniri (30K/dk) once baglar: 30 cagri x ~1100 token = 33K > 30K. "
+                             "Bu yuzden varsayilan 25.")
     parser.add_argument("--max-batch", type=int, default=0, help="Bu koşuda en fazla kaç batch işlensin (0 = sınırsız)")
     parser.add_argument(
         "--batch", default="",
@@ -101,7 +111,18 @@ def main():
              "resume yine çalışır çünkü asıl durum batch_NNNN_ciktilar.json'dadır.",
     )
     parser.add_argument("--insan-md", action="store_true", help="İnsan incelemesi için ayrıca MD raporu yaz")
+    parser.add_argument("--sicaklik-tavani", type=float, default=None,
+                        help="Kategori sicakliklarina TAVAN uygula (or. 0.9). OpenAI-uyumlu saglayicilarda min_p guvenlik agi olmadigi icin 1.1 ciplak kalir.")
     args = parser.parse_args()
+
+    if args.sicaklik_tavani is not None:
+        core.SICAKLIK_TAVANI = args.sicaklik_tavani
+        print(f"[+] Sicaklik tavani: {args.sicaklik_tavani}")
+
+    if args.saglayici != "ollama":
+        args.host = saglayici_ayarla(args.saglayici, args.istek_dk,
+                                     host=None if args.host == OLLAMA_HOST_VARSAYILAN else args.host)
+        print(f"[+] Saglayici: {args.saglayici}  model={args.model}  host={args.host}")
 
     dizin = Path(args.cikti_dizini)
     durum = durum_yukle(dizin)
