@@ -13,7 +13,7 @@ kaggle_ayaga_kaldırma.ipynb
 aciklama_claude.py
 aciklama_gemini.py
 firma_adlari_cikar.py
-firma_adlari_osm_cek.py
+
 simüle_edilmek_istenen.md
 .claude/*
 CLAUDE.md
@@ -21,7 +21,7 @@ deneme.jsonl
 deneme.md
 deneme2.md
 deneme2.jsonl
-pilot_set_hazirla.py
+
 docs/*
 # ...ama diyagramlar README'de kullanılıyor, onlar repoya girsin
 !docs/diagrams/
@@ -46,5 +46,10 @@ temiz_urunler.csv.yedek_kurumsal
 !data/urun_verileri/*.csv
 !data/hizmet_verileri/*.csv
 !data/anomali_verileri/*.csv
+
+# mevcut "belirli klasörleri dahil et" bloğunun altına
+!data/soyisimler.sql
+!data/firma_registry.csv
+!data/firma_adlari_osm.csv
 
 /rapor_analiz.py
