@@ -424,6 +424,67 @@ _NITELIK_KUYRUGU = {
     "tuzsuz", "organik", "vegan", "rafine", "servis", "porsiyon",
 }
 
+# SONDAKI NITELEYICI -- atilmaz, BAS ISMIN ONUNE alinir (2026-08-01).
+#
+# 'son iki anlamli kelime' kurali Turkcede bas ismin SONDA oldugu varsayimina
+# dayanir. Ad SIFATLA bitince varsayim coker (olculdu: 4.000 urunde %13,8):
+#     'Icim Sut Cikolatali 200Ml'    -> 'sut cikolatali'   (ters tamlama)
+#     'F Neffis Sut Yarim Yagli 1Lt' -> 'yarim yagli'      (bas isim DUSTU)
+#     'Papia Cep Mendili Cocuk'      -> 'mendili cocuk'    (anlamsiz)
+# Model bunlari sadakatle cumleye yerlestirdigi icin 'sacma aciklama'nin
+# dogrudan kaynagiydi.
+#
+# LISTE KURATORLU, SON EK KURALI DEGIL -- KASITLI. '-li/-lu' son ekiyle sifat
+# yakalamak cazip ama 'mendili', 'peyniri', 'ekmegi' de oyle biter (iyelik eki)
+# ve onlar BAS ISIMDIR; sezgisel kural tam da bu fonksiyonun gecmisteki
+# regresyon kaynagi. Liste veriden cikarildi (havuzda son kelime frekansi).
+#
+# GUVENLIK GARANTISI: son kelime bu kumede DEGILSE davranis bit bit eskisiyle
+# ayni kalir. Yani duzeltme yalnizca bozuk vakalara dokunur.
+# Her uye HAVUZDA fiilen son kelime olarak GECIYOR (frekansla dogrulandi).
+# Hic gecmeyen adaylar (bebek, haslanmis, kizarmis, kuru, sebzeli, tavuklu,
+# kiymali) KASITLI olarak YOK: fayda getirmeden risk tasirlar.
+#
+# 'kavrulmus' DENENDI ve GERI ALINDI: 'Petibor Cifte Kavrulmus' -> eski cikti
+# 'cifte kavrulmus' DOGRUYDU, yeniden siralama onu 'kavrulmus cifte' yapip
+# kaliplasmis tamlamayi bozdu. Sifat gibi gorunen SIFAT-FIIL'ler (-mis) bu
+# listeye GIRMEZ; kalibin parcasi olabilirler.
+_SON_NITELEYICI = {
+    # tat / icerik
+    "kakaolu", "cikolatali", "çikolatalı", "findikli", "fındıklı", "kremali",
+    "kremalı", "meyveli", "sutlu", "sütlü", "yagli", "yağlı", "tuzlu",
+    "baharatli", "baharatlı", "dolgulu", "sekerli", "şekerli", "cilekli",
+    "çilekli", "muzlu", "kayisili", "kayısılı", "visneli", "vişneli",
+    "portakalli", "portakallı", "limonlu", "naneli", "bademli", "cevizli",
+    "fistikli", "fıstıklı", "susamli", "susamlı", "peynirli", "mantarli",
+    "mantarlı",
+    # hazirlanis / nitelik
+    "sade", "taze", "dilimli", "sikmalik", "sıkmalık", "kiymalik", "kıymalık",
+    "yarim", "yarım", "klasik", "normal", "light",
+    # boyut / hedef kitle / paket sinifi
+    "orta", "buyuk", "büyük", "kucuk", "küçük", "mini", "eko", "ekonomik",
+    "ekstra", "ozel", "özel", "cocuk", "çocuk",
+}
+
+# Baglaclar bas isim ya da niteleyici DEGILDIR; birakilirsa 'Yasemin Ve Aloera'
+# -> 've aloera' gibi baglacla BASLAYAN sonuc cikiyordu (havuzun %0,5'i).
+_BAGLAC_KELIMELERI = {"ve", "ile", "veya", "ya", "and", "&"}
+
+
+def _niteleyici_onune_al(kelimeler: list[str]) -> list[str]:
+    """Son kelime niteleyiciyse onu bas ismin ONUNE alip iki kelime dondurur.
+
+    Bas isim = SONDAN geriye dogru ilk NITELEYICI OLMAYAN kelime. Boylece bas
+    isim iki niteleyici arkasinda kalsa da kurtarilir ('Sut Yarim Yagli').
+    Hicbir niteleyici yoksa ya da hepsi niteleyiciyse liste AYNEN doner ->
+    cagiran taraf eski davranisi (son iki kelime) uygular."""
+    if len(kelimeler) < 2 or _tr_normalize(kelimeler[-1]) not in _SON_NITELEYICI:
+        return kelimeler
+    for i in range(len(kelimeler) - 1, -1, -1):
+        if _tr_normalize(kelimeler[i]) not in _SON_NITELEYICI:
+            return [kelimeler[-1], kelimeler[i]]      # 'cikolatali' + 'sut'
+    return kelimeler
+
 
 def kalem_adi_sadelestir(ad: str) -> str:
     """Ham kalem adını çalışanın yazacağı hâle indirger.
@@ -450,7 +511,9 @@ def kalem_adi_sadelestir(ad: str) -> str:
     sade = unicodedata.normalize("NFC", ad).replace("̇", "")
     sade = _URUN_DETAY_GURULTU.sub(" ", sade)
     sade = re.sub(r"[^\w\s]", " ", sade)
-    kelimeler = [k for k in sade.split() if len(k) > 1 and not k.isdigit()]
+    kelimeler = [k for k in sade.split()
+                 if len(k) > 1 and not k.isdigit()
+                 and _tr_normalize(k) not in _BAGLAC_KELIMELERI]
     while kelimeler and (_tr_normalize(kelimeler[-1]) in _OLCU_AMBALAJ_KELIMELERI
                          or _tr_normalize(kelimeler[-1]) in _RENK_KELIMELERI):
         kelimeler.pop()
@@ -502,7 +565,10 @@ def kalem_adi_sadelestir(ad: str) -> str:
         # aksi halde Türkçe kuralı geçerli, sondan al.
         if len(govde) < len(kelimeler):
             return " ".join(govde[:2]).lower()
-        return " ".join(govde[-2:]).lower()
+        # TURKCE dali: son kelime niteleyiciyse bas ismin onune alinir.
+        # Niteleyici degilse `_niteleyici_onune_al` listeyi AYNEN dondurur ->
+        # eski davranis (son iki kelime) korunur.
+        return " ".join(_niteleyici_onune_al(govde)[-2:]).lower()
     return " ".join(kelimeler[:2]).lower()
 
 
@@ -688,12 +754,66 @@ def _fewshot_havuz(kategori: str, dal: str | None = None) -> list[str]:
     return FEWSHOT.get(kategori, [])
 
 
+# --- DIZGI CARPITMA: tipografik leakage panzehiri (2026-08-01) --------------
+#
+# OLCULDU (25k uretim + 100'luk Kaggle pilotu, ayni sonuc): kategori, metnin
+# ICERIGINE HIC BAKILMADAN ayirt edilebiliyordu --
+#     yeterli %100 nokta / yetersiz %0 nokta / ai_uretimi %100 nokta+buyuk harf
+# Yalnizca "nokta var mi + buyuk harf mi" ile `yetersiz` %95 recall / %84
+# precision ile bulunuyor. Bu, `uzunluk_hedefi_sec`in kategori-uzunluk
+# korelasyonunu kirma gerekcesiyle AYNI sinif leakage.
+#
+# KAYNAK prompt'taki orneklerin DIZGISI: FEWSHOT[yeterli/ai/manipulatif]
+# %100 buyuk harf + %100 nokta, YETERSIZ_ORNEK_HAVUZ (61 girdi) %0 + %0.
+# Model uslubu degil DIZGIYI taklit ediyor.
+#
+# COZUM havuzun 90 literalini elle duzenlemek DEGIL (kirilgan, gozden kacar):
+# ornekler prompt'a girerken dizgi OLASILIKLA cevriliyor. Havuz tek kaynak
+# olarak kalir, yeni kural/token eklenmez (bkz. faz-b-prompt.md 15).
+#
+# AMAC %50/50 DEGIL: usengec calisanin kucuk harf yazmasi GERCEKCI ve
+# korunmali. Amac kurali EGILIME cevirmek -- %100/%0 yerine ~%70/%30.
+_DIZGI_CEVIRME_ORANI = 0.30
+
+# OLCULDU (Kaggle pilotu, 100 kayit): duz %30 ile `yetersiz` nokta orani
+# %0 -> %8 oldu, hedef %25-30'du. Kategorinin butun cercevesi ("bastan savma,
+# usengec") modeli kucuk harfe itmeye devam ediyor; tek ornegi cevirmek
+# yetmiyor. Ileride yukseltilecekse KATEGORIYE OZEL yapilmali ve `ai_uretimi`
+# DUSUK birakilmali: onun %100 resmi dizgisi ARTEFAKT DEGIL kategorinin
+# TANIMIDIR (urun_detay_kopya/tutar_sizinti'nin ai'de serbest olmasiyla ayni
+# mantik -- AI AYRACI, sizinti degil). Duz orani yukseltmek onu da bozardi.
+
+
+def _tr_bas_harf(harf: str, buyut: bool) -> str:
+    """Turkce'ye UYGUN bas harf donusumu.
+
+    Python'un varsayilani Turkce'de YANLIS: 'i'.upper() -> 'I' (dogrusu 'İ'),
+    'İ'.lower() -> 'i' + U+0307 birlesen nokta (dogrusu 'i'). Ikincisi bu kod
+    tabaninda zaten iz birakmis bir tuzak (bkz. kalem_adi_sadelestir'deki NFC
+    notu): birlesen nokta asagi akista kelimeyi ORTADAN boluyor."""
+    if buyut:
+        return {"i": "İ", "ı": "I"}.get(harf, harf.upper())
+    return {"I": "ı", "İ": "i"}.get(harf, harf.lower()).replace("̇", "")
+
+
+def _dizgi_carpit(ornek: str) -> str:
+    """Ornegin buyuk-harf/son-nokta dizgisini olasilikla TERSINE cevirir."""
+    if not ornek or random.random() >= _DIZGI_CEVIRME_ORANI:
+        return ornek
+    resmi = ornek[0].isupper() and ornek.rstrip()[-1:] in ".!?"
+    if resmi:                       # resmi -> gundelik
+        s = _tr_bas_harf(ornek[0], False) + ornek[1:]
+        return s.rstrip().rstrip(".!?")
+    s = _tr_bas_harf(ornek[0], True) + ornek[1:]        # gundelik -> resmi
+    return s if s.rstrip()[-1:] in ".!?" else s.rstrip() + "."
+
+
 def fewshot_blok(kategori: str, adet: int = 2, dal: str | None = None) -> str:
     havuz = _fewshot_havuz(kategori, dal)
     if not havuz:
         return ""
     secim = random.sample(havuz, min(adet, len(havuz)))
-    satirlar = "\n".join(f"- {s}" for s in secim)
+    satirlar = "\n".join(f"- {_dizgi_carpit(s)}" for s in secim)
     return f"Örnek TARZLAR (birebir kopyalama, yalnız tarzı yakala):\n{satirlar}\n"
 
 
@@ -1520,6 +1640,55 @@ def olay_sec(departman: str | None, baskin_kategori_ham: str) -> tuple[str, str]
 OLAY_OLASILIGI = 0.5
 
 
+# --- OLAY TÜRÜ: SÜRE mi NEDEN mi? (2026-08-01) ------------------------------
+#
+# OLAY_CERCEVELERI'nin 10 kalıbından 7'si SÜRE bildirir ('sırasında', 'devam
+# ederken', 'günü', 'sonrasında'...) ve `bireysel` dalı zaten SABİT olarak
+# "'{olay}' sırasında" yazıyordu. Havuzda ise ANLIK/TETİKLEYİCİ olaylar var --
+# bunlara süre kalıbı takılınca Türkçe bozuluyor:
+#     "servis kaçırma sırasında ... otopark ücreti ödedim"      (ölçüldü: 83 metin,
+#     "kendi cihazımın arızalanması sırasında"                   %76'sında kalem de
+#     "hava koşullarının değişmesi sırasında"                    uyumsuzdu)
+# Servisi kaçırmak bir SÜRE değil, bir NEDENdir.
+#
+# Çözüm: bu olayların NEDEN biçimini hazır yazıyoruz (tıpkı `ayrilma_eki`'nde
+# -dan/-den'i modele bırakmayıp hesapladığımız gibi). Değerler TAM ifadedir,
+# üzerine çerçeve UYGULANMAZ -- '-dığı için' çekimini 8B'ye kurdurmak yerine
+# doğrusunu veriyoruz. Varyant havuzu sabit kalıp collapse'ını da önler.
+OLAY_NEDEN_BICIMI: dict[str, list[str]] = {
+    "servis kaçırma": ["servisi kaçırdığım için", "servise yetişemediğimden",
+                       "servis saatini kaçırdığımdan ötürü"],
+    "kendi cihazımın arızalanması": ["kendi cihazım arızalandığı için",
+                                     "cihazım bozulduğundan"],
+    "ekipman kaybı": ["ekipmanımı kaybettiğim için", "ekipman kaybolduğundan"],
+    "masamdaki sarfın bitmesi": ["masamdaki sarf bittiği için",
+                                 "masamdaki malzeme tükendiğinden"],
+    "hava koşullarının değişmesi": ["hava koşulları değiştiği için",
+                                    "hava aniden bozduğundan"],
+    "uzaktan bağlantı sorunu": ["uzaktan bağlantı sorunu yaşadığım için"],
+    "kurulum eksiği": ["kurulum eksik kaldığı için"],
+    "otoparka bırakma": ["aracı otoparka bırakmam gerektiği için"],
+    "görüşmeye yetişme": ["görüşmeye yetişmem gerektiği için"],
+    "plan dışı görev": ["plan dışı bir görev çıktığı için"],
+    "görev sırasında çıkan ihtiyaç": ["görev sırasında ihtiyaç çıktığı için"],
+}
+
+# Kendi bağlacını ZATEN taşıyan olaylar: çerçeve eklenirse çift bağlaç olur
+# ('uçuş iptali nedeniyle mecburi kalış sırasında').
+OLAY_CERCEVESIZ = {"uçuş iptali nedeniyle mecburi kalış"}
+
+
+def olay_cercevele(olay: str) -> str:
+    """Olayı cümleye gömülecek biçime sokar: NEDEN olayları hazır çekimli
+    döner, SÜRE olayları rastgele bir OLAY_CERCEVELERI kalıbına girer."""
+    neden = OLAY_NEDEN_BICIMI.get(olay)
+    if neden:
+        return random.choice(neden)
+    if olay in OLAY_CERCEVESIZ:
+        return olay
+    return random.choice(OLAY_CERCEVELERI).format(olay=olay)
+
+
 def baglam_notu_uret(persona: dict, baskin_ham: str, manipulatif_dal: str | None = None) -> tuple[str, dict]:
     """Prompt'a eklenecek BAĞLAM cümlesi + meta. Boş string dönebilir (bilinçli).
 
@@ -1541,7 +1710,7 @@ def baglam_notu_uret(persona: dict, baskin_ham: str, manipulatif_dal: str | None
     if not dep:
         return "", {}
     olcek, olay = olay_sec(dep, baskin_ham)
-    cerceveli = random.choice(OLAY_CERCEVELERI).format(olay=olay)
+    cerceveli = olay_cercevele(olay)
     meta = {"departman": dep, "olay": olay, "olcek": olcek}
 
     if manipulatif_dal == "gizleme":
@@ -1554,7 +1723,11 @@ def baglam_notu_uret(persona: dict, baskin_ham: str, manipulatif_dal: str | None
     # OLAY cümlenin BAŞINDA: departman öne alındığında model onu AMAÇ sanıyordu
     # ("Ar-Ge için kisisel bakim ürünleri aldım"). Departman artık parantezde, ikincil.
     elif olcek == "bireysel":
-        notu = (f" BAĞLAM: bu harcamayı '{olay}' sırasında, KENDİN için tek başına yaptın "
+        # 'sırasında' SABİTİ KALDIRILDI (2026-08-01): anlık olaylara takılınca
+        # "servis kaçırma sırasında" gibi bozuk Türkçe üretiyordu. Artık çerçeveyi
+        # olayın türü belirler (bkz. olay_cercevele). Olay yine cümlenin BAŞINDA --
+        # departman öne alınınca model onu AMAÇ sanıyordu (aşağıdaki nota bak).
+        notu = (f" BAĞLAM: {cerceveli} bu harcamayı KENDİN için tek başına yaptın "
                 f"({dep} birimindesin). Bu senin kendi masrafın; bağlamı kendi cümlenle anlat.")
     else:
         notu = (f" BAĞLAM: bu harcama {cerceveli} yapıldı ({dep} birimindesin). "
@@ -1737,7 +1910,11 @@ def prompt_olustur(fatura: dict, kategori: str, anomali_turleri: list[str] | Non
         # üç seçenekten (kuru öbek / umursamaz söz / genel ad) biri.
         _genel_ad = _KATEGORI_GENEL_AD.get(baskin_kategori(fatura["kalemler"]))
         genel_ipucu = f" (ör. '{_genel_ad}')" if _genel_ad else ""
-        ornekler = ", ".join(f"'{o}'" for o in random.sample(YETERSIZ_ORNEK_HAVUZ, 2))
+        # _dizgi_carpit: havuzun 61 girdisi de kucuk harf + noktasiz; oldugu gibi
+        # gosterilince `yetersiz` ciktilarinin %100'u oyle cikiyor ve kategori
+        # icerige bakmadan bilinebilir hale geliyordu (bkz. _DIZGI_CEVIRME_ORANI).
+        ornekler = ", ".join(f"'{_dizgi_carpit(o)}'"
+                             for o in random.sample(YETERSIZ_ORNEK_HAVUZ, 2))
         talimat = (
             f"KARAKTER: YETERSİZ çalışan. Baştan savma, muğlak, geçiştirmelik bir not yaz. İşi kiminle/neden "
             f"yaptığını ASLA söyleme - ama gizlemeye de uğraşma, sadece yazmaya üşen. Üslup: {uslup}. "
@@ -2939,6 +3116,19 @@ def duzeltme_notu_uret(ihlaller: list[str], meta: dict | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 VS_KATEGORILER = {"yetersiz", "manipulatif"}
+
+# VS DISI kategorilerde (yeterli / ai_uretimi) uretilecek ADAY sayisi.
+#
+# 2 -> 3 (2026-08-01). Gerekce faz-b-prompt.md 15: 8B kapasitesi doygun, her
+# yeni kisit akiciligi yiyor. Retry'in yapisal sorunu da bu -- duzeltme notu
+# prompt'a 8. bir kisit ekliyor. Kaggle pilotunda olculdu: retry %32, ikinci
+# denemede de duzelmeyen %14.
+#
+# 3. aday NOTSUZ ve TAZE alinir (bagimsiz yeniden orneklem), boylece "daha cok
+# kisit" yerine "daha cok deneme" stratejisine geciyoruz. Ihlalsiz aday cikar
+# cikmaz DONULUR -- yani temiz uretimde ek maliyet YOK; 3. cagri yalniz ilk iki
+# adayin da ihlalli oldugu ~%14'luk dilimde atilir.
+ADAY_SAYISI = 3
 VS_ADAY_SAYISI = 3
 
 VS_SUFFIX = (
@@ -3155,9 +3345,15 @@ def tek_fatura_isleme(fatura, etiket, model, host, keep_alive: str | int | None 
         return _tek_fatura_vs(fatura, etiket, model, host, keep_alive, kategori,
                               system_prompt, user_prompt, meta, taban_sicaklik, min_p)
 
+    temiz_user_prompt = user_prompt   # düzeltme notu EKLENMEMİŞ hâli (3. deneme için)
     metin = None
     ihlaller: list[str] = []
-    for deneme in range(1, 3):  # ilk deneme + 1 düzeltici retry
+    # EN İYİ ADAYI TUT (2026-08-01). Eski akış iki denemenin SONUNCUSUNU
+    # döndürüyordu: 1. deneme 1 ihlalliyse ve 2. deneme 3 ihlalli geldiyse
+    # KÖTÜ olanı yazıyorduk. Artık en az ihlalli aday kazanır -- ek çağrı
+    # maliyeti YOK, sadece hangi çıktının tutulacağı değişti.
+    en_iyi: tuple[list[str], str] | None = None
+    for deneme in range(1, ADAY_SAYISI + 1):
         # Sıcaklık merdiveni: retry'da temp'i biraz yükselt (takılan üretimden
         # çıkış) + her denemede farklı seed -> yeniden deneme gerçekten farklı.
         # min_p güvenlik ağı olduğu için tavan 1.3'e kadar açıldı.
@@ -3191,7 +3387,17 @@ def tek_fatura_isleme(fatura, etiket, model, host, keep_alive: str | int | None 
         if not ihlaller:
             return fatura, etiket, metin, None, [], deneme
 
-        if deneme == 1:
-            user_prompt = user_prompt + "\n\n" + duzeltme_notu_uret(ihlaller, meta)
+        if en_iyi is None or len(ihlaller) < len(en_iyi[0]):
+            en_iyi = (ihlaller, metin)
 
-    return fatura, etiket, metin, None, ihlaller, 2
+        if deneme == 1:
+            # 2. deneme DÜZELTME NOTUYLA (mevcut davranış korunur).
+            user_prompt = user_prompt + "\n\n" + duzeltme_notu_uret(ihlaller, meta)
+        elif deneme == 2:
+            # 3. deneme NOTSUZ ve TAZE: düzeltme notu prompt'a 8. bir kısıt
+            # ekliyor, oysa 8B zaten doygun (faz-b-prompt.md 15) -- ikinci nota
+            # daha fazla kısıt yığmak yerine bağımsız yeniden örneklem alıyoruz.
+            user_prompt = temiz_user_prompt
+
+    ihlaller, metin = en_iyi if en_iyi else (ihlaller, metin)
+    return fatura, etiket, metin, None, ihlaller, ADAY_SAYISI
