@@ -34,8 +34,6 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, Template
 from playwright.sync_api import sync_playwright
 
-from generators.field_generator import TAM_SAYI_BIRIMLERI
-
 
 def kimlik_etiketi(kimlik_no: str) -> str:
     """10 haneliyse VKN, 11 haneliyse TCKN etiketi döndürür."""
@@ -58,8 +56,16 @@ def tutar_formatla(deger) -> str:
 
 
 def miktar_formatla(birim: str, miktar: float) -> str:
-    """Tam sayiysa '3', değilse '3,45' (Türkçe ondalik, gereksiz .0 basmaz)."""
-    if birim in TAM_SAYI_BIRIMLERI:
+    """Tam sayiysa '3', değilse '3,45' (Türkçe ondalik, gereksiz .0 basmaz).
+
+    KARAR BIRIME DEGIL DEGERE BAKAR (2026-08-01). Eskiden `birim in
+    TAM_SAYI_BIRIMLERI` ise `int(miktar)` basiliyordu; birim listesine 'Ay' ve
+    'Paket' eklenince bu, ESKI veriyi (2,72 Ay) sessizce '2 Ay' diye basar,
+    satir toplami ise hâlâ 2,72 uzerinden hesaplanirdi -> 7.427 fisde sahte
+    "hesap tutmuyor" sinyali. Degere bakarak fis, verinin hangi kosudan
+    geldiginden BAGIMSIZ olarak kendi icinde tutarli kalir; birim listesi de
+    yalniz URETIMI yonetir (bkz. field_generator.rastgele_miktar)."""
+    if float(miktar).is_integer():
         return str(int(miktar))
     return f"{miktar:.2f}".replace(".", ",")
 
@@ -97,14 +103,91 @@ def tarih_tr(iso_tarih: str) -> str:
     return f"{g}.{a}.{y}"
 
 
-def saat_uret(kayit_id: str) -> str:
+def saat_uret(tohum: str) -> str:
     """Fiş saati (08:00-20:59). Veride saat alani YOK, gerçek fişte var.
 
-    kayit_id'den türetilir: hem kararlidir hem de etiketlerle KORELASYONSUZDUR.
+    Tohumdan türetilir: hem kararlidir hem de etiketlerle KORELASYONSUZDUR.
     Saati anomaliye/kategoriye bağli üretmek görsele sahte bir sinyal ekler ve
-    aşaği akiştaki model onu kisayol olarak öğrenir."""
-    h = _kayit_hash(kayit_id)
+    aşaği akiştaki model onu kisayol olarak öğrenir.
+
+    Tohum kural olarak kayit_id'dir; TEK istisna `saat_tohumlari_kur`un
+    eşleştirdiği mükerrer yükleme çiftleridir (bkz. o fonksiyon)."""
+    h = _kayit_hash(tohum)
     return f"{8 + h % 13:02d}:{(h // 13) % 60:02d}"
+
+
+# `saat_tohumlari_kur`un özdeşlik imzasindan DIŞLANAN alanlar: fişin üstünde
+# BASILMAYAN, dolayisiyla iki görselin ayni olup olmadigini belirlemeyen alanlar.
+#   kayit_id      -- çiftin tanimi geregi tek farki; imzaya girerse hiçbir şey eşleşmez.
+#   aciklama_metni-- Faz B çiktisi. Mükerrer çiftte KASITLI olarak farklidir
+#                    (bkz. anomaly_injector._mukerrer_fis_yukleme_uygula: ayni fişi
+#                    ikinci kez yükleyen çalişan sifirdan not yazar). Fişe basilmaz.
+# Girdi olarak `faturalar_aciklamali.json` verildiğinde bu alan olmadan eşleşme
+# 1496'dan 0'a düşüyordu -- yani düzeltme sessizce devre disi kaliyordu.
+IMZA_DISI_ALANLAR = {"kayit_id", "aciklama_metni"}
+
+
+def saat_tohumlari_kur(faturalar: list[dict]) -> dict[str, str]:
+    """`kayit_id -> saat tohumu` eşlemesi: AYNI fişin iki kez yüklendiği
+    (`mukerrer_fis_yukleme`) çiftlerde iki görselin ayni saati basmasini sağlar.
+
+    Sorun: saat `kayit_id`'nin hash'inden türüyordu, f2 ise f1'in `kayit_id`
+    HARİÇ birebir kopyasi. Dolayisiyla ayni kâğit iki farkli saatle basiliyordu
+    -- oysa saat kâğidin üstünde basilidir, ikinci yükleme onu değiştirmez.
+    Model çelişkili kanit görüyordu: yapisal alanlarin tamami ayni ("ayni fiş")
+    ama saat farkli ("iki ayri alişveriş"). Ölçüldü: fisler_25k'da eşi de sette
+    olan 125 çiftin 30'u bu durumdaydi; şablon_1'e SAAT satiri eklendikten sonra
+    (saatsiz olduğu için sorunsuz görünen 33 çift dahil) 125'inin tamami
+    bozulacakti -- bu yüzden iki değişiklik birlikte gitmek ZORUNDA.
+
+    GÜVENLİK -- eşleme etiket dosyasindan DEĞİL verinin kendisinden çikar:
+    yalnizca `kayit_id` HARİÇ tüm alanlari birebir eşit olan kayitlar ayni
+    tohuma bağlanir. Bu test
+      * `fatura_no_cakismasi`'ni (ayni vkn+fatura_no ama tarih/kalemler farkli),
+      * doğal fatura_no çakişmalarini (CLAUDE.md §7, ~5 adet; her şey farkli)
+    yapisal olarak DIŞARIDA birakir. Etiket render katmanina sizmaz ve "yanliş
+    fiş eşitlendi" vakasi tanim geregi imkânsizdir: eşitlenen iki kayit zaten
+    birebir ayniysa ayni saati basmalari DOĞRU davraniştir.
+
+    ŞABLON KASITLI OLARAK EŞİTLENMEZ (`sablon_sec` kayit_id'de kalir): çift
+    piksel piksel özdeşleşirse mükerrerlik perceptual hash ile çözülebilir hale
+    gelir. Farkli düzen + ayni saat, modeli içerik eşleştirmeye zorlayan tutarli
+    bir zor vaka birakir (ölçüldü: 62 çift).
+    """
+    gruplar: dict[tuple[str, str], list[dict]] = {}
+    for f in faturalar:
+        gruplar.setdefault((f["satici_vkn"], f["fatura_no"]), []).append(f)
+
+    tohumlar: dict[str, str] = {}
+    aday_grup = 0
+    for kayitlar in gruplar.values():
+        if len(kayitlar) < 2:
+            continue
+        aday_grup += 1
+        # IMZA_DISI alanlarin disindakilerin imzasina göre kümele.
+        kumeler: dict[str, list[str]] = {}
+        for f in kayitlar:
+            imza = json.dumps({k: v for k, v in f.items() if k not in IMZA_DISI_ALANLAR},
+                              sort_keys=True, ensure_ascii=False)
+            kumeler.setdefault(imza, []).append(f["kayit_id"])
+        for kimlikler in kumeler.values():
+            if len(kimlikler) > 1:
+                # min(): hangi kaydin f1 oldugu veriden okunamaz (etikete
+                # bakmadan). Deterministik bir temsilci yeterli -- amac ortak
+                # bir saat, belirli bir saat degil.
+                tohum = min(kimlikler)
+                for kid in kimlikler:
+                    tohumlar[kid] = tohum
+
+    # GÜRÜLTÜLÜ UYARI: ayni (vkn, fatura_no) tasiyan gruplar VAR ama hiçbiri
+    # özdeş çikmadiysa imza büyük olasilikla fişte BASILMAYAN bir alan yüzünden
+    # ayrişiyordur (IMZA_DISI_ALANLAR'a bak). Sessizce geçerse düzeltme
+    # uygulanmadan 24k fiş render edilir ve fark edilmez.
+    if aday_grup and not tohumlar:
+        print(f"  [!] UYARI: ayni (vkn, fatura_no) tasiyan {aday_grup} grup var ama "
+              f"hiçbiri özdeş çikmadi -> saat tohumu UYGULANMADI. Girdi dosyasinda "
+              f"IMZA_DISI_ALANLAR'a eklenmemiş fazladan bir alan olabilir.")
+    return tohumlar
 
 
 def kdv_gruplari_kur(kalemler: list[dict]) -> list[dict]:
@@ -123,13 +206,16 @@ def kdv_gruplari_kur(kalemler: list[dict]) -> list[dict]:
     return [gruplar[o] for o in sorted(gruplar)]
 
 
-def baglam_kur(fatura: dict) -> dict:
+def baglam_kur(fatura: dict, saat_tohumlari: dict[str, str] | None = None) -> dict:
     """fatura_to_dict çiktisi + şablonlarin ihtiyaç duyduğu türetilmiş alanlar."""
+    kayit_id: str = fatura["kayit_id"]
+    # Tohum kural olarak kayit_id; eşlemede varsa mükerrer çiftin ortak tohumu.
+    tohum = saat_tohumlari.get(kayit_id, kayit_id) if saat_tohumlari else kayit_id
     baglam = dict(fatura)
     baglam["satici_kimlik_etiketi"] = kimlik_etiketi(fatura["satici_vkn"])
     baglam["kalemler"] = [kalem_gosterimi(k) for k in fatura["kalemler"]]
     baglam["fatura_tarihi_tr"] = tarih_tr(fatura["fatura_tarihi"])
-    baglam["saat"] = saat_uret(fatura["kayit_id"])
+    baglam["saat"] = saat_uret(tohum)
     baglam["kdv_gruplari"] = kdv_gruplari_kur(fatura["kalemler"])
     return baglam
 
@@ -153,6 +239,11 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Test için ilk N faturayı işle (varsayılan: hepsi)")
     parser.add_argument("--yeniden", action="store_true",
                         help="Var olan PNG'leri de yeniden üret (varsayılan: atlanır, resume)")
+    parser.add_argument("--tohum-json", default=None,
+                        help="Saat tohumlarının hesaplanacağı TAM fatura dosyası "
+                             "(varsayılan: --input-json). Alt küme render ederken "
+                             "tam dosyayı ver, yoksa mükerrer çiftin eşi görünmez ve "
+                             "fiş tam koşudakinden FARKLI saat alır.")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -160,6 +251,16 @@ def main():
 
     with open(args.input_json, "r", encoding="utf-8") as f:
         faturalar = json.load(f)
+
+    # Tohumlar --limit'ten ÖNCE, tam havuzdan hesaplanir: dilim mükerrer çiftin
+    # bir üyesini disarda birakirsa saat tam koşudakinden farkli çikardi.
+    if args.tohum_json:
+        with open(args.tohum_json, "r", encoding="utf-8") as f:
+            saat_tohumlari = saat_tohumlari_kur(json.load(f))
+    else:
+        saat_tohumlari = saat_tohumlari_kur(faturalar)
+    print(f"Saat tohumu eşlenen kayıt: {len(saat_tohumlari)} "
+          f"({len(set(saat_tohumlari.values()))} mükerrer yükleme kümesi)")
 
     if args.limit:
         faturalar = faturalar[: args.limit]
@@ -191,7 +292,7 @@ def main():
 
             try:
                 sablon = sablon_sec(fatura, sablonlar)
-                sayfa.set_content(sablon.render(**baglam_kur(fatura)))
+                sayfa.set_content(sablon.render(**baglam_kur(fatura, saat_tohumlari)))
                 sayfa.locator(".receipt-container").screenshot(path=str(cikti_yolu))
                 uretilen += 1
             except Exception as e:
