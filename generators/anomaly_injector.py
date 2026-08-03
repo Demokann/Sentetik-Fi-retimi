@@ -8,7 +8,7 @@ from schema import (
     POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI, paraya_yuvarla
 )
 from generators.field_generator import (
-    ACIKLAMA_HAVUZU, rastgele_birim, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura,
+    ACIKLAMA_HAVUZU, rastgele_birim, birim_sec, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura,
     mutfak_anahtari,
     firma_kisit_anahtari,
 )
@@ -86,10 +86,15 @@ def is_kolu_kategori_uyumsuzlugu_anomali_uret(fatura: Fatura) -> Fatura:
     yabanci_kategori = random.choice(yabanci_kategoriler)
 
     yeni_kalem_no = len(fatura.kalemler) + 1
-    birim = rastgele_birim(yabanci_kategori)
+    # Birim ACIKLAMADAN turetilir (birim_sec), rastgele DEGIL: enjekte edilen
+    # kalem de fise normal satir olarak basilir ve orada '0,58 Litre Toz Seker'
+    # gorunurdu. Enjektorun isi anomali eklemek; birim-urun uyumsuzlugu KASITLI
+    # bir anomali degil, istenmeyen gercek disilik.
+    aciklama = random.choice(ACIKLAMA_HAVUZU[yabanci_kategori])
+    birim = birim_sec(yabanci_kategori, aciklama)
     yeni_kalem = FaturaKalemi(
         kalem_no=yeni_kalem_no,
-        aciklama=random.choice(ACIKLAMA_HAVUZU[yabanci_kategori]),
+        aciklama=aciklama,
         harcama_kategorisi=yabanci_kategori,
         miktar=rastgele_miktar(birim),
         birim=birim,
@@ -109,10 +114,11 @@ def yasakli_kategori_anomali_uret(fatura: Fatura) -> Fatura:
     yasakli_kategori = random.choice(list(POLICY_YASAKLI_KATEGORILER))
 
     yeni_kalem_no = len(fatura.kalemler) + 1
-    birim = rastgele_birim(yasakli_kategori)
+    aciklama = random.choice(ACIKLAMA_HAVUZU[yasakli_kategori])
+    birim = birim_sec(yasakli_kategori, aciklama)
     yeni_kalem = FaturaKalemi(
         kalem_no=yeni_kalem_no,
-        aciklama=random.choice(ACIKLAMA_HAVUZU[yasakli_kategori]),
+        aciklama=aciklama,
         harcama_kategorisi=yasakli_kategori,
         miktar=rastgele_miktar(birim),
         birim=birim,
@@ -138,11 +144,12 @@ def limit_asimi_anomali_uret(fatura: Fatura) -> Fatura:
         # YENİ bir kalem ekleyip onu limit üstü fiyatlandiriyoruz.
         limitli_kategori = random.choice(list(POLICY_TUTAR_LIMITLERI.keys()))
         yeni_kalem_no = len(fatura.kalemler) + 1
-        birim = rastgele_birim(limitli_kategori)
+        aciklama = random.choice(ACIKLAMA_HAVUZU[limitli_kategori])
+        birim = birim_sec(limitli_kategori, aciklama)
         limit = POLICY_TUTAR_LIMITLERI[limitli_kategori]
         yeni_kalem = FaturaKalemi(
             kalem_no=yeni_kalem_no,
-            aciklama=random.choice(ACIKLAMA_HAVUZU[limitli_kategori]),
+            aciklama=aciklama,
             harcama_kategorisi=limitli_kategori,
             miktar=rastgele_miktar(birim),
             birim=birim,
