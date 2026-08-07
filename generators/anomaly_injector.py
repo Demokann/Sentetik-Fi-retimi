@@ -5,8 +5,9 @@ from decimal import Decimal
 from schema import (
     Fatura, FaturaKalemi, HarcamaKategorisi,
     IS_KOLU_KATEGORILERI, KDV_ORANI_MAP,
-    POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI, paraya_yuvarla
+    POLICY_YASAKLI_KATEGORILER, paraya_yuvarla
 )
+from politika import kalem_limiti, limitli_kategoriler, zorunlu_kalem_limiti
 from generators.field_generator import (
     ACIKLAMA_HAVUZU, rastgele_birim, birim_sec, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura,
     mutfak_anahtari,
@@ -135,18 +136,27 @@ def yasakli_kategori_anomali_uret(fatura: Fatura) -> Fatura:
 
 def limit_asimi_anomali_uret(fatura: Fatura) -> Fatura:
     """Limitli bir kategorideki kalemin birim fiyatini, limitin üstüne kasitli olarak çeker."""
-    limitli_kalemler = [
-        k for k in fatura.kalemler if k.harcama_kategorisi in POLICY_TUTAR_LIMITLERI
-    ]
+    # (kalem, limit) ikilisi: limit ayrica aranmasin ve None ihtimali burada elensin.
+    limitli_kalemler: list[tuple[FaturaKalemi, float]] = []
+    for k in fatura.kalemler:
+        k_limit = kalem_limiti(k.harcama_kategorisi, k.birim)
+        if k_limit is not None:
+            limitli_kalemler.append((k, k_limit))
 
     if not limitli_kalemler:
         # Faturada limitli kategori yok -- rastgele bir limitli kategoriden
         # YENİ bir kalem ekleyip onu limit üstü fiyatlandiriyoruz.
-        limitli_kategori = random.choice(list(POLICY_TUTAR_LIMITLERI.keys()))
+        # Aday: limiti OLAN ve ürün havuzu DOLU kategoriler. Politika dosyasi hiç
+        # limit tanimlamamiş olabilir; o durumda fatura değişmeden döner (no-op ->
+        # karisik_veri_seti_uret etiket de atamaz), üretim patlamaz.
+        adaylar = [k for k in limitli_kategoriler() if ACIKLAMA_HAVUZU.get(k)]
+        if not adaylar:
+            return fatura
+        limitli_kategori = random.choice(adaylar)
         yeni_kalem_no = len(fatura.kalemler) + 1
         aciklama = random.choice(ACIKLAMA_HAVUZU[limitli_kategori])
         birim = birim_sec(limitli_kategori, aciklama)
-        limit = POLICY_TUTAR_LIMITLERI[limitli_kategori]
+        limit = zorunlu_kalem_limiti(limitli_kategori, birim)
         yeni_kalem = FaturaKalemi(
             kalem_no=yeni_kalem_no,
             aciklama=aciklama,
@@ -167,8 +177,7 @@ def limit_asimi_anomali_uret(fatura: Fatura) -> Fatura:
 
         return fatura
 
-    kalem = random.choice(limitli_kalemler)
-    limit = POLICY_TUTAR_LIMITLERI[kalem.harcama_kategorisi]
+    kalem, limit = random.choice(limitli_kalemler)
     kalem.birim_fiyat = Decimal(str(limit * random.uniform(1.5, 3.0)))
     return fatura
 

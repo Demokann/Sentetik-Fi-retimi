@@ -73,14 +73,7 @@ def anomali_grubu(anomali_turleri) -> str:
     return "A" if any(t in A_GRUBU_ANOMALILER for t in anomali_turleri) else "B"
 
 
-# Kategori bazli üst tutar limitleri (aşilirsa şüpheli sayilir)
-#!ÖNEMLİ
-#FIYAT_ARALIGI_'daki %30 dışarı-taşma üst sınırının üzerinde tutulmalı, aksi halde doğal gürültü limit_asimi'yı organik olarak tetikleyebilir."* 
-POLICY_TUTAR_LIMITLERI: dict[HarcamaKategorisi, float] = {
-    HarcamaKategorisi.YEMEK_HIZMETI: 3000,
-    HarcamaKategorisi.KONAKLAMA: 20000,
-    HarcamaKategorisi.ULASIM_BIREYSEL: 5000,
-}
+# Kategori bazli üst tutar limitleri: `data/politika_limitleri.json`, okuyucusu politika.py.
 
 KDV_ORANI_MAP = {
     HarcamaKategorisi.YEMEK_HIZMETI: 10.0,

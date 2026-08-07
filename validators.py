@@ -2,8 +2,9 @@ from decimal import Decimal
 from datetime import date
 from schema import (
     Fatura, FaturaKalemi, HarcamaKategorisi, IsKolu, KDV_ORANI_MAP, paraya_yuvarla,
-    IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER, POLICY_TUTAR_LIMITLERI,
+    IS_KOLU_KATEGORILERI, POLICY_YASAKLI_KATEGORILER,
 )
+from politika import kalem_limiti
 from generators.anomaly_injector import ANOMALI_FONKSIYONLARI
 from generators.field_generator import FIYAT_ARALIGI_GENEL, ANOMALI_URUN_MAKULLUGU
 
@@ -155,7 +156,7 @@ def kalem_yasakli_kategoride_mi(kalem: FaturaKalemi) -> bool:
 #5d. Politika İhlali — Limit Aşımı Kontrolü
 def kalem_limit_asimi_mi(kalem: FaturaKalemi) -> bool:
     """Kalemin birim fiyati, kategorisi için tanimli politika limitini aşiyor mu?"""
-    limit = POLICY_TUTAR_LIMITLERI.get(kalem.harcama_kategorisi)
+    limit = kalem_limiti(kalem.harcama_kategorisi, kalem.birim)
     return limit is not None and kalem.birim_fiyat > Decimal(str(limit))
 
 #5e/5f. Ondalık (Decimal-Point) Kayması Tespiti — Fat-Finger Fiyat Hatası
@@ -321,7 +322,7 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
                 f"{kalem.harcama_kategorisi.value}"
             )
         if kalem_limit_asimi_mi(kalem):
-            limit = POLICY_TUTAR_LIMITLERI[kalem.harcama_kategorisi]
+            limit = kalem_limiti(kalem.harcama_kategorisi, kalem.birim)
             hatalar.append(
                 f"LIMIT_ASIMI: Kalem {kalem.kalem_no} ({kalem.harcama_kategorisi.value}) "
                 f"birim fiyati limiti aşiyor: {kalem.birim_fiyat} > {limit}"

@@ -4,6 +4,7 @@ from decimal import Decimal
 from faker import Faker
 from datetime import date, timedelta
 from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu, FirmaTuru, KDV_ORANI_MAP
+from politika import kalem_limiti
 import re, math, unicodedata
 from pathlib import Path
 
@@ -782,8 +783,8 @@ FIYAT_ARALIGI_DETAYLI = {
     (HarcamaKategorisi.KONAKLAMA, "Adet"): (1500, 15000),
 
     (HarcamaKategorisi.TEMEL_GIDA, "Kg"): (50, 800), # Sebzeden kirmizi ete uzanan aralik
-    (HarcamaKategorisi.TEMEL_GIDA, "Litre"): (20, 500), # Su/Sütten Zeytinyağina uzanan aralik
-    (HarcamaKategorisi.TEMEL_GIDA, "Adet"): (20, 500),
+    (HarcamaKategorisi.TEMEL_GIDA, "Litre"): (10, 800), # Su/Sütten Zeytinyağina uzanan aralik
+    (HarcamaKategorisi.TEMEL_GIDA, "Adet"): (20, 800),
 
     (HarcamaKategorisi.ULASIM_BIREYSEL, "Km"): (150, 1750),
     (HarcamaKategorisi.ULASIM_HIZMETI, "Km"): (250, 3500),
@@ -1759,6 +1760,42 @@ _FIYAT_ARALIK_HATALARI = _fiyat_araliklarini_dogrula()
 if _FIYAT_ARALIK_HATALARI:
     print("[!] FIYAT ARALIGI UYARISI -- bu araliklar TEMIZ faturada sahte anomali uretir:")
     for _h in _FIYAT_ARALIK_HATALARI:
+        print(f"      {_h}")
+
+
+def _politika_limitlerini_dogrula() -> list[str]:
+    """Her (kategori, birim) icin politika limiti, uretimin cikardigi en yuksek
+    fiyatin (tasma dahil) ustunde mi? Altindaysa TEMIZ fatura da limit_asimi alir.
+    Fiyat tablolari burada oldugu icin denetim politika.py'de degil burada."""
+    hatalar: list[str] = []
+    for kategori, birimler in BIRIM_HAVUZU.items():
+        # Urun tipi katmani birimden bagimsiz eslesir -> her birim icin gecerli.
+        urun_tipi_tavan = max(
+            (high + (high - low) * FIYAT_TASMA_ORANI
+             for _, (low, high) in FIYAT_ARALIGI_URUN_TIPI.get(kategori, ())),
+            default=0.0,
+        )
+        for birim in birimler:
+            if not isinstance(birim, str):
+                continue
+            limit = kalem_limiti(kategori, birim)
+            if limit is None:
+                continue
+            low, high = FIYAT_ARALIGI_DETAYLI.get(
+                (kategori, birim), FIYAT_ARALIGI_GENEL[kategori]
+            )
+            tavan = max(high + (high - low) * FIYAT_TASMA_ORANI, urun_tipi_tavan)
+            if limit < tavan:
+                hatalar.append(
+                    f"{kategori.value}/{birim}: limit {limit:.0f} < uretim tavani {tavan:.0f}"
+                    f" -> sahte limit_asimi")
+    return hatalar
+
+
+_POLITIKA_LIMIT_HATALARI = _politika_limitlerini_dogrula()
+if _POLITIKA_LIMIT_HATALARI:
+    print("[!] POLITIKA LIMIT UYARISI -- data/politika_limitleri.json duzeltilmeli:")
+    for _h in _POLITIKA_LIMIT_HATALARI:
         print(f"      {_h}")
 
 

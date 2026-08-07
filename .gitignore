@@ -9,10 +9,11 @@ deneme.py
 kaggle_v8_yukleme.zip
 kaggle_v9_yukleme.zip
 kaggle_ayaga_kaldırma.ipynb
-
+market_urunleri.csv.yedek_niteleyici
 aciklama_claude.py
 aciklama_gemini.py
 firma_adlari_cikar.py
+kaggle_v10
 
 simüle_edilmek_istenen.md
 .claude/*
@@ -51,5 +52,7 @@ temiz_urunler.csv.yedek_kurumsal
 !data/soyisimler.sql
 !data/firma_registry.csv
 !data/firma_adlari_osm.csv
+# uretilen veri degil, KONFIGURASYON: politika limitleri (bkz. politika.py)
+!data/politika_limitleri.json
 
 /rapor_analiz.py
