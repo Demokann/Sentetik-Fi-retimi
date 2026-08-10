@@ -796,6 +796,40 @@ def _tr_bas_harf(harf: str, buyut: bool) -> str:
     return {"I": "ı", "İ": "i"}.get(harf, harf.lower()).replace("̇", "")
 
 
+# Dizgi tek başına kategoriyi %68,4 doğrulukla veriyordu (taban %54,6): yetersiz
+# %22 büyük/%8 nokta, yeterli %78/%99,5. `_dizgi_carpit` örnek üzerinden dolaylı
+# çalışıyor ve yetmiyor (%30 çevirme -> çıktıda %8). Burada son işlem olarak
+# doğrudan hedef dağılıma çekilir; simülasyonda %68,4 -> %55,7.
+# ai_uretimi KASITLI dışarıda: %100 resmî dizgi onun TANIMI, artefakt değil.
+_DIZGI_HEDEFI: dict[str, tuple[float, float]] = {
+    # kategori: (büyük harfle başlama olasılığı, nokta ile bitme olasılığı)
+    "yeterli": (0.70, 0.80),
+    "yetersiz": (0.45, 0.40),
+    "manipulatif": (0.70, 0.65),
+}
+
+
+def dizgi_normalize(metin: str, kategori: str) -> str:
+    """Baş harf / son nokta dizgisini kategorinin hedef dağılımına çeker.
+
+    Yalnız '.' eklenip çıkarılır; '!' ve '?' anlam taşır, dokunulmaz.
+    Türkçe baş harf için `_tr_bas_harf` şart."""
+    hedef = _DIZGI_HEDEFI.get(kategori)
+    if not metin or hedef is None:
+        return metin
+    p_buyuk, p_nokta = hedef
+    s = metin.strip()
+    if not s:
+        return metin
+    s = _tr_bas_harf(s[0], random.random() < p_buyuk) + s[1:]
+    if random.random() < p_nokta:
+        if s[-1:] not in ".!?":
+            s += "."
+    elif s[-1:] == ".":
+        s = s[:-1].rstrip()
+    return s
+
+
 def _dizgi_carpit(ornek: str) -> str:
     """Ornegin buyuk-harf/son-nokta dizgisini olasilikla TERSINE cevirir."""
     if not ornek or random.random() >= _DIZGI_CEVIRME_ORANI:
@@ -1528,13 +1562,53 @@ _INCE_EK_ISTISNALARI = {
 }
 
 
+# Iyelik ekiyle biten unvanda kaynastirma 'n'si zorunlu: Otel-i-'n-den.
+# Olculdu: "Oteli'den" 504, dogrusu 8 -> kural bu vakayi hic tanimiyordu.
+# Son ek kurali DEGIL kuratorlu liste: 'taksi', 'teknoloji', 'bayi' de i/u ile
+# biter ama iyelik degildir ("Taksi'den" dogrudur). Kumede olmayan kelimede
+# davranis eskisiyle birebir ayni ('bayi' hayir, 'bayii' evet).
+_IYELIK_SONU = {
+    "oteli", "lokantasi", "lokantası", "kuaforu", "kuaförü", "salonu", "berberi",
+    "evi", "konukevi", "pansiyonu", "merkezi", "subesi", "şubesi", "yeri",
+    "bakkaliyesi", "magazasi", "mağazası", "marketleri", "hipermarketleri",
+    "pazari", "pazarı", "carsisi", "çarşısı", "duragi", "durağı", "ciftligi",
+    "çiftliği", "mutfagi", "mutfağı", "sofrasi", "sofrası", "ocakbasi",
+    "ocakbaşı", "koftecisi", "köftecisi", "borekcisi", "börekçisi", "balikcisi",
+    "balıkçısı", "dunyasi", "dünyası", "bayii", "oglu", "oğlu",
+    "malzemeleri", "urunleri", "ürünleri", "yemekleri", "hizmetleri",
+    "sistemleri", "teknolojileri", "mobilyalari", "mobilyaları", "servisi",
+    "sti", "şti",
+}
+
+
+def _iyelik_sonu_mu(kelime: str) -> bool:
+    """Son kelime iyelik ekiyle mi bitiyor (kaynaştırma 'n'si gerekir mi)?
+
+    `-evi` BİRLEŞİKLERİ tek tek listelenmez: 'ev' + iyelik kalıbı üretkendir
+    (kitabevi, orduevi, öğretmenevi, modaevi, aşevi, konukevi...). Registry'de
+    son kelimesi `-evi` ile biten 13 farklı biçimin TAMAMI bu kalıptandır
+    (ölçüldü), tek harflik yanlış eşleşmeyi önlemek için asgari uzunluk aranır.
+    Bu, `_IYELIK_SONU`'nun küratörlü mantığına DAR bir istisnadır; başka ek için
+    genelleme YAPMA (bkz. 'bayi' vs 'bayii')."""
+    k = re.sub(r"[^a-zçğıöşü]", "", (kelime or "").lower())
+    return k in _IYELIK_SONU or (len(k) > 4 and k.endswith("evi"))
+
+
 def ayrilma_eki(ad: str) -> str:
-    """'Duru Market' -> \"Duru Market'ten\". Özel ada kesme işaretiyle bağlanır."""
+    """'Duru Market' -> \"Duru Market'ten\". Özel ada kesme işaretiyle bağlanır.
+
+    İyelik ekiyle biten unvanlarda kaynaştırma 'n'si eklenir
+    ('Fırat Oteli' -> "Fırat Oteli'nden"); bkz. `_IYELIK_SONU`."""
     cekirdek = (ad or "").strip().rstrip(".").strip()
     harfler = [h for h in cekirdek.lower() if h.isalpha()]
     if not harfler:
         return cekirdek
     son_kelime = re.sub(r"[^a-zçğıöşü]", "", cekirdek.lower().split()[-1])
+    if _iyelik_sonu_mu(son_kelime):
+        # Kaynastirma 'n'sinden sonra ses her zaman YUMUSAKTIR (-nden/-ndan);
+        # sert sessiz kurali burada UYGULANMAZ.
+        son_unlu = next((h for h in reversed(harfler) if h in _SESLI), "a")
+        return f"{cekirdek}'n{'da' if son_unlu in _KALIN_SESLI else 'de'}n"
     if son_kelime in _INCE_EK_ISTISNALARI:
         kalin = False
     else:
@@ -3301,6 +3375,22 @@ def elenmeli_mi(metin: str, kalan_ihlaller: list[str] | None = None) -> tuple[bo
 
 
 def tek_fatura_isleme(fatura, etiket, model, host, keep_alive: str | int | None = None):
+    """`_tek_fatura_isleme_ham` + ÇIKTI DİZGİSİ normalizasyonu.
+
+    Sarmalayıcı olmasının sebebi: ham fonksiyonun (VS akışı dâhil) BEŞ ayrı
+    başarılı dönüş noktası var; dizgiyi her birinde tek tek uygulamak bir
+    tanesini atlamaya davetiye çıkarır. Normalizasyon SON adımdır -- ihlal
+    denetimi ham metin üzerinde yapılır, dizgi ondan sonra ayarlanır (dizgi
+    hiçbir ihlal kuralını etkilemez: karşılaştırmalar `_dedup_normalize`
+    üzerinden gider, o da küçük harfe çevirip noktalamayı atar)."""
+    sonuc = _tek_fatura_isleme_ham(fatura, etiket, model, host, keep_alive)
+    metin = sonuc[2]
+    if not metin:
+        return sonuc
+    return (*sonuc[:2], dizgi_normalize(metin, etiket["aciklama_kategorisi"]), *sonuc[3:])
+
+
+def _tek_fatura_isleme_ham(fatura, etiket, model, host, keep_alive: str | int | None = None):
     """
     Bir faturayı işler: prompt kur, Ollama'yı çağır, ihlal varsa bir kez
     düzeltici retry uygula. Dönüş:
