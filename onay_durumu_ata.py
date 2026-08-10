@@ -61,6 +61,7 @@ from pathlib import Path
 VARSAYILAN_CIKTI_DIZINI = "data/aciklama"
 VARSAYILAN_ETIKET_JSON = "data/faturalar_etiketler.json"
 VARSAYILAN_OUTPUT_JSON = "data/faturalar_aciklamali_etiketler.json"
+VARSAYILAN_GIRDI_JSON = "data/faturalar_aciklamali.json"
 
 ONAY_DURUMLARI = ["onaylandi", "gozden_gecirilecek", "onaylanmadi"]
 
@@ -88,6 +89,31 @@ def uretilen_kayitlari_yukle(dizin: Path) -> dict[str, dict]:
         for kayit_id, kayit in cikti.items():
             kayitlar[kayit_id] = kayit
     return kayitlar
+
+
+def girdiyle_hizala(uretilen: dict[str, dict], girdi_json: str) -> dict[str, dict]:
+    """Model girdisinde OLMAYAN kayitlari düser.
+
+    `aciklama_birlestir.py --eleme` bazi kayitlari veri setine sokmuyor; bu modül
+    ayni dizini süzgeçsiz okudugu icin onlara yine de etiket üretirdi ve iki dosya
+    farkli kayit kümesi tasirdi. Üyeligin TEK kaynagi birlestirmenin ciktisidir;
+    kategori yine batch dizininden okunur (girdi dosyasi o alani tasimaz).
+
+    Dosya yoksa hizalama yapilmaz -- birlestirme henüz kosulmamis olabilir."""
+    yol = Path(girdi_json)
+    if not yol.exists():
+        print(f"[!] Girdi dosyasi yok ({girdi_json}); hizalama YAPILMADI. "
+              f"aciklama_birlestir.py --eleme ile kosulduysa iki dosyanin kayit "
+              f"kümesi FARKLI olur, once onu kosup bu modülü tekrar calistir.")
+        return uretilen
+    with open(yol, "r", encoding="utf-8") as f:
+        girdi_idler = {k["kayit_id"] for k in json.load(f)}
+    hizali = {kid: k for kid, k in uretilen.items() if kid in girdi_idler}
+    dusen = len(uretilen) - len(hizali)
+    if dusen:
+        print(f"[+] Girdi dosyasiyla hizalandi: {dusen} kayit düstü "
+              f"({len(uretilen)} -> {len(hizali)}), kaynak {girdi_json}")
+    return hizali
 
 
 def etiketleri_uret(etiketler: list[dict], uretilen: dict[str, dict],
@@ -206,12 +232,16 @@ def main():
                         help="Açiklamasi olmayan kayitlari da yaz (onay_durumu BOŞ). "
                              "aciklama_birlestir.py --sadece-uretilenler OLMADAN "
                              "koşulduysa iki dosyanin satir kümesi ayni kalsin diye.")
+    parser.add_argument("--girdi-json", default=VARSAYILAN_GIRDI_JSON,
+                        help="aciklama_birlestir.py ciktisi; etiket kümesi buna "
+                             "hizalanir (--eleme kullanildiysa sart). Yoksa uyarilir.")
     parser.add_argument("--rapor-json", default=None,
                         help="opsiyonel: dagilim raporunu bu yola yaz")
     args = parser.parse_args()
 
     uretilen = uretilen_kayitlari_yukle(Path(args.cikti_dizini))
     print(f"[+] {len(uretilen)} adet üretilmis açiklama bulundu ({args.cikti_dizini}).")
+    uretilen = girdiyle_hizala(uretilen, args.girdi_json)
     if not uretilen:
         print("HATA: hiç üretilmis açiklama yok. Önce aciklama_toplu_uret.py çalistir.")
         return
