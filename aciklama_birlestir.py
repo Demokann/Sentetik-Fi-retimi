@@ -17,12 +17,13 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from aciklama_uretim_core import elenmeli_mi
+from aciklama_uretim_core import elenmeli_mi, iliskisel_cift_idleri
 
 VARSAYILAN_CIKTI_DIZINI = "data/aciklama"
 
 
-def aciklama_haritasi_kur(dizin: Path, eleme: bool = False) -> tuple[dict[str, str], Counter]:
+def aciklama_haritasi_kur(dizin: Path, eleme: bool = False,
+                          korunanlar: set[str] | None = None) -> tuple[dict[str, str], Counter]:
     """batch_*_ciktilar.json dosyalarından kayit_id -> aciklama_metni haritası.
 
     Anahtar fatura_no DEĞİL: mukerrer_fis_yukleme / fatura_no_cakismasi anomalilerinde
@@ -52,7 +53,7 @@ def aciklama_haritasi_kur(dizin: Path, eleme: bool = False) -> tuple[dict[str, s
             cikti = json.load(f)
         for kid, kayit in cikti.items():
             metin = kayit["aciklama_metni"]
-            if eleme:
+            if eleme and not (korunanlar and kid in korunanlar):
                 at, sebep = elenmeli_mi(metin, kayit.get("kalan_ihlaller"),
                                         kayit.get("aciklama_kategorisi"))
                 if at:
@@ -66,6 +67,8 @@ def main():
     parser = argparse.ArgumentParser(description="Üretilen açıklamaları faturalar.json'a merge et")
     parser.add_argument("--cikti-dizini", default=VARSAYILAN_CIKTI_DIZINI, help="batch çıktı dizini")
     parser.add_argument("--input-json", default="data/faturalar.json", help="asıl faturalar.json")
+    parser.add_argument("--etiket-json", default="data/faturalar_etiketler.json",
+                        help="ilişkisel çift korumasını kurmak için (yalnız --eleme ile okunur)")
     parser.add_argument("--output-json", default="data/faturalar_aciklamali.json", help="çıktı dosyası")
     parser.add_argument("--sadece-uretilenler", action="store_true",
                         help="Sadece açıklaması üretilmiş faturaları yaz (alt küme çalıştıysa küçük dosya)")
@@ -74,8 +77,21 @@ def main():
                         help="[DENEYSEL] Kalite süzgecini AÇ: şema sızıntılı kayıtları veri setine sokma")
     args = parser.parse_args()
 
+    print(f"[+] {args.input_json} okunuyor...")
+    with open(args.input_json, "r", encoding="utf-8") as f:
+        faturalar = json.load(f)
+
+    # İlişkisel çiftin iki üyesi de elemeden MUAF: biri düşerse anomali
+    # çözülemez hale gelir ve o örnek için harcanan üretim boşa gider.
+    korunanlar: set[str] = set()
+    if args.eleme:
+        with open(args.etiket_json, "r", encoding="utf-8") as f:
+            etiket_map = {e["kayit_id"]: e for e in json.load(f)}
+        korunanlar = iliskisel_cift_idleri(faturalar, etiket_map)
+        print(f"[+] İlişkisel çift koruması: {len(korunanlar)} kayıt elemeden muaf.")
+
     dizin = Path(args.cikti_dizini)
-    harita, elenen = aciklama_haritasi_kur(dizin, eleme=args.eleme)
+    harita, elenen = aciklama_haritasi_kur(dizin, eleme=args.eleme, korunanlar=korunanlar)
     toplam_ham = len(harita) + sum(elenen.values())
     print(f"[+] {toplam_ham} adet üretilmiş açıklama bulundu.")
     if elenen:
@@ -87,10 +103,6 @@ def main():
     if not harita:
         print("HATA: hiç üretilmiş açıklama yok. Önce aciklama_toplu_uret.py çalıştır.")
         return
-
-    print(f"[+] {args.input_json} okunuyor...")
-    with open(args.input_json, "r", encoding="utf-8") as f:
-        faturalar = json.load(f)
 
     eslesen = 0
     sonuc = []
