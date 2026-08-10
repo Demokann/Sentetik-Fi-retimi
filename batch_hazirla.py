@@ -284,57 +284,44 @@ def anomali_turu_kotali_sec(
     seed: int = 42,
 ) -> tuple[list[dict], dict]:
     """
-    faturalar.jsonda geçerli fatura havuzundan, her anomali türünün (anomali_turleri
-    içindeki ham türler) alt kümede tabana (tur_taban) kadar temsil edilmesini,
-    bol türlerin ise tavani (tur_tavan) aşmamasini garanti eden kota bazlı bir
-    seçim yapar. Union/çoklu-etiket faturalar (bir fatura birden fazla türe
-    aynı anda sahip olabilir) seçildiğinde sahip oldukları TÜM türlerin
-    kotasından düşülür -- bir faturayı iki kez saymadan kotaları da
-    şişirmeden. Kalan hedef, temiz faturalarla (~%70-75) doldurulur.
+    Fatura havuzundan, her anomali türü (ham `anomali_turleri`) alt kümede en az
+    `tur_taban`, en fazla `tur_tavan` kadar temsil edilecek şekilde kota bazlı
+    seçim yapar. Çoklu etiketli bir fatura seçildiğinde sahip olduğu TÜM
+    türlerin kotasından düşülür (faturayı iki kez saymadan, kotayı şişirmeden);
+    kalan hedef temiz faturalarla (~%70-75) doldurulur.
 
-    Bu seçim tamamlandıktan SONRA, seçilen batch üzerinde aciklama_kategorisi
-    için de ayrı bir kota (varsayılan %50/20/20/10) uygulanır -- bkz.
-    _kategori_kotali_yeniden_ata. Bu, anomali_turleri kotasından bağımsız
-    ikinci bir eksendir; faturanın etiketteki mevcut kategorisi öncelikli
-    denenir, kota doluysa türün ağırlık sıralamasında bir sonraki uygun
-    kategoriye düşülür (rastgele/alakasız bir kategoriye değil).
+    İkinci ve bağımsız eksen `aciklama_kategorisi`dir (varsayılan hedef
+    %50/20/20/10): etiket YENİDEN ATANMAZ, o kategoriye sahip faturalar SEÇİLİR
+    (`kategori_hedefli`). Eski yeniden-atama yolu `kategori_override` ile açılır.
 
-    Döndürdüğü (secilenler, rapor) ikilisinde rapor: tür bazında kaç fatura
-    alındığı, hedefin altında kalan türler (varsa), nihai anomali oranı --
-    bandın (temiz_orani_min/max'ın tümleyeni) dışına çıkarsa bunu işaretler
-    (elle zorlamaz, sadece raporlar) -- ve aciklama_kategorisi dağılımı +
-    kaç faturanın kategorisinin override edildiği.
+    Döner: (secilenler, rapor). Rapor tür bazlı seçim adetlerini, tabanın
+    altında kalan türleri, nihai anomali oranını (bandın dışına çıkarsa
+    işaretler, zorlamaz) ve kategori dağılımını içerir.
+    Ölçümler/gerekçe: docs/dökümantasyon/02-faz-b-aciklama-uretimi.md
     """
     if hedef_kategori_oranlari is None:
         hedef_kategori_oranlari = VARSAYILAN_KATEGORI_HEDEF_ORANLARI
     rnd = random.Random(seed)
 
-    # DİKKAT: anahtar fatura_no DEĞİL kayit_id. fatura_no, mukerrer_fis_yukleme /
-    # fatura_no_cakismasi anomalilerinde kasitli olarak tekrar eder; fatura_no ile
-    # anahtarlarsak çiftin biri sessizce DÜŞER ve tek metin iki kayda yazilir.
+    # DİKKAT: anahtar fatura_no DEĞİL kayit_id -- fatura_no mükerrer anomalilerde
+    # kasitli tekrar eder, onunla anahtarlarsak çiftin biri sessizce DÜŞER.
     etiket_map = {e["kayit_id"]: e for e in etiketler}
     fatura_map = {f["kayit_id"]: f for f in faturalar}
 
     anomalili_no = [fno for fno, e in etiket_map.items() if e["is_anomali"]]
     temiz_no = [fno for fno, e in etiket_map.items() if not e["is_anomali"]]
 
-    # Tür havuzları: ONCELIK_SIRASI gibi sabit bir tür listesi icat etmek
-    # yerine, etiketlerde fiilen görülen türlerden dinamik kurulur (yeni bir
-    # anomali türü eklenirse otomatik dahil olur).
+    # Tür havuzları sabit liste yerine etiketlerde fiilen görülen türlerden
+    # dinamik kurulur (yeni bir anomali türü eklenirse otomatik dahil olur).
     tur_havuzlari: dict[str, list[str]] = {}
     for fno in anomalili_no:
         for tur in etiket_map[fno]["anomali_turleri"]:
             tur_havuzlari.setdefault(tur, []).append(fno)
 
-    # İşlem sırası ONCELIK_SIRASI'nı (aciklama_uretici) yeniden kullanır --
-    # bazı türler bir üst türün NEREDEYSE TAM ALT KÜMESİ (ör. yasakli_kategori
-    # -> is_kolu_kategori_uyumsuzlugu %100, genel_toplam/satir_toplami ->
-    # footer_kismi %100 örtüşüyor, injector yan etkisi). Bu durumda hangi tür
-    # önce işlenirse ortak tavan bütçesini o alır; ONCELIK_SIRASI zaten "en
-    # insan-bilinçli/kasıtlı"yı önce sıralıyor, o yüzden aynı mantık burada da
-    # kullanılır (yasakli_kategori limit_asimi/is_kolu'dan önce bütçeyi
-    # kapabilsin diye). Listede olmayan yeni bir tür çıkarsa (havuzu en küçük
-    # olan önce işlenecek şekilde) sona eklenir.
+    # İşlem sırası ONCELIK_SIRASI'nı (aciklama_uretici) yeniden kullanır: türler
+    # iç içe geçtiği için (ör. genel_toplam ⊂ footer_kismi) ortak tavan bütçesini
+    # önce işlenen alır, ONCELIK_SIRASI da en kasıtlı türü öne koyar. Listede
+    # olmayan yeni tür, havuzu küçük olan önce gelecek şekilde sona eklenir.
     bilinen_turler = [t for t in ONCELIK_SIRASI if t in tur_havuzlari]
     yeni_turler = sorted(
         (t for t in tur_havuzlari if t not in ONCELIK_SIRASI),
@@ -342,47 +329,27 @@ def anomali_turu_kotali_sec(
     )
     tur_sirasi = bilinen_turler + yeni_turler
 
-    # Konteyner türlere (ör. footer_kismi, is_kolu_kategori_uyumsuzlugu) veriden
-    # otomatik tespitle ek tavan bütçesi tanı -- bkz. _konteyner_tavanlarini_hesapla.
+    # Konteyner türlere (ör. footer_kismi) veriden otomatik ek tavan bütçesi.
     tavan_efektif = _konteyner_tavanlarini_hesapla(tur_havuzlari, tur_taban, tur_tavan)
 
-    # tur_sayaci: bir türden GERÇEKTE kaç fatura seçildiği (hangi türün
-    # "sırasında" seçildiğine bakılmaksızın, union nedeniyle bir fatura başka
-    # bir türün turunda seçilse bile bu türden sayılır). Tavan bunun üzerinden
-    # KATI şekilde uygulanır -- aksi halde (yalnızca "kendi sırasında kaç tane
-    # seçildi" sayılırsa) yapısal türler (ör. footer_kismi) diğer sayısal
-    # anomalilerin yan etkisiyle union'a sızıp tavanı fazlasıyla aşabilir.
+    # tur_sayaci: bir türden GERÇEKTE kaç fatura seçildiği (union nedeniyle başka
+    # bir türün turunda seçilse de sayılır). Tavan bunun üzerinden KATI uygulanır;
+    # aksi halde yapısal türler union'a sızıp tavanı fazlasıyla aşardı.
     tur_sayaci: dict[str, int] = {tur: 0 for tur in tur_havuzlari}
     secilen_anomalili: set[str] = set()
 
     # --- KATEGORİ EKSENİ: yeniden atama DEĞİL, SEÇİM ---------------------
-    # `aciklama_kategorisi` etiketi ARAŞTIRMAYLA KALİBRE edilmiş ağırlıklarla
-    # (ACIKLAMA_KATEGORI_ORANLARI) Faz A'da atanır ve BURADA ASLA DEĞİŞTİRİLMEZ.
-    # Hedef kompozisyona (varsayılan %50/20/20/10) ulaşmanın doğru yolu etiketi
-    # yeniden atamak değil (bkz. _kategori_kotali_yeniden_ata -- artık gereksiz),
-    # o kategoriye SAHİP faturaları seçmektir.
-    #
-    # Neden gerekliydi: kota seçimi yalnız anomali TÜRÜNE bakıyordu, kategoriye
-    # kör olduğu için kompozisyon havuzun doğal dağılımına düşüyordu
-    # (ölçüldü, 20k: %56,0/29,6/6,9/7,5 -- manipulatif hedefin üçte biri).
-    #
-    # Fizibilite (ölçüldü): tür kotaları altında seçilebilen anomalili
-    # faturaların 2991'i manipulatif; havuzda ayrıca 1495 TEMİZ manipulatif var
-    # -> ulaşılabilir tavan 4486 >= 20k'nın %20'si olan 4000. Yani hedef salt
-    # seçimle karşılanabilir; manipulatif EN DAR eksendir, bu yüzden tür
-    # döngüsünde ona öncelik verilir.
+    # aciklama_kategorisi Faz A'da kalibre edilir, BURADA ASLA DEĞİŞTİRİLMEZ; hedef
+    # kompozisyona o kategoriye SAHİP faturaları seçerek ulaşılır (salt tür kotası
+    # kategoriye kör, kompozisyon havuzun doğal dağılımına düşüyordu).
     kategori_hedefi: dict[str, int] = {
         kat: round(hedef_toplam * oran) for kat, oran in hedef_kategori_oranlari.items()
     } if kategori_hedefli else {}
     kategori_sayaci: Counter = Counter()
 
-    # KITLIK SIRASI -- anomalili turda hangi kategoriye öncelik verileceği.
-    # Ölçüt "kotası açık mı" DEĞİL (turun başında hepsi açıktır, ayrım üretmez),
-    # TEMİZ havuzdaki bolluktur: anomalili slotlar kıt, temiz havuz ise dolgu
-    # kaynağıdır. Temizde bol olan bir kategoriyi (yeterli: 44.355) anomalili
-    # slotta harcamak israftır; temizde kıt olanı (manipulatif: 1.495) ise
-    # ancak anomalili taraftan toplayabiliriz. Bu yüzden temiz havuzu KÜÇÜK
-    # olan kategori önce gelir.
+    # KITLIK SIRASI: anomalili turda önceliği, TEMİZ havuzu en KÜÇÜK olan kategori
+    # alır. Anomalili slotlar kıt, temiz havuz dolgudur: temizde bol olanı (yeterli)
+    # anomalili slotta harcamak israf, kıtı (manipulatif) ancak oradan toplanabilir.
     _temiz_bolluk: Counter = Counter(
         etiket_map[fno]["aciklama_kategorisi"] for fno in temiz_no
     )
@@ -392,9 +359,8 @@ def anomali_turu_kotali_sec(
     _DOLMUS = 99  # kotası dolmuş kategori en sona
 
     def _kategori_onceligi(fno: str) -> int:
-        """Küçük = önce seç. Kotayı KATI sınır yapmıyoruz: dolmuş kategoriden de
-        alınabilir, yalnız sıralamada en sona düşer -- aksi halde tür tabanları
-        karşılanamaz ve kota mekanizmasının asıl amacı bozulurdu."""
+        """Küçük = önce seç. Kota KATI sınır DEĞİL: dolmuş kategori yalnız
+        sıralamada sona düşer, aksi halde tür tabanları karşılanamazdı."""
         if not kategori_hedefli:
             return 0
         kat = etiket_map[fno]["aciklama_kategorisi"]
@@ -408,16 +374,10 @@ def anomali_turu_kotali_sec(
             continue
         adaylar = [fno for fno in tur_havuzlari[tur] if fno not in secilen_anomalili]
         sira = _cesitli_sira(adaylar, fatura_map, rnd)
-        # Münhasırlık önceliği: bu tur içindeki adaylar arasında, BAŞKA
-        # (tur_havuzlari'nda izlenen) türlere daha az sahip olanlar önce
-        # denenir -- böylece bir türü doldururken paylaşımlı/kıt bütçeli
-        # başka bir türün (ör. is_kolu_kategori_uyumsuzlugu) kotası gereksiz
-        # tüketilmez (bkz. limit_asimi örneği). sort() stabil olduğu için
-        # aynı münhasırlık skorundakiler arasında çeşitlilik sırası korunur.
-        # Sıralama ölçütü İKİ eksenli: önce kategori kotası açık olanlar
-        # (kompozisyon hedefi), sonra münhasırlık (tür bütçesini koru).
-        # Kategori ekseni ÖNCE gelir çünkü tür tavanı zaten katı bir üst sınır
-        # olarak ayrıca uygulanıyor; münhasırlık ise yalnız bir optimizasyon.
+        # Sıralama İKİ eksenli: önce kategori kotası açık olanlar (kompozisyon),
+        # sonra münhasırlık -- başka türlere daha az sahip aday önce denenir ki kıt
+        # bütçeli başka türün kotası gereksiz tüketilmesin. Kategori ÖNCE gelir:
+        # tür tavanı zaten katı sınır, münhasırlık yalnız optimizasyon.
         sira.sort(key=lambda fno: (
             _kategori_onceligi(fno),
             sum(1 for t2 in etiket_map[fno]["anomali_turleri"] if t2 != tur and t2 in tur_sayaci),
@@ -427,9 +387,8 @@ def anomali_turu_kotali_sec(
             if alinan >= ihtiyac:
                 break
             turleri = etiket_map[fno]["anomali_turleri"]
-            # Bu faturayi almak, sahip olduğu BAŞKA bir türü kendi (efektif)
-            # tavanının üzerine taşıyorsa vazgeç -- kota her tür için
-            # bağımsız bir tavan, bir türü doldururken başkasını taşırmamalı.
+            # Bu faturayi almak BAŞKA bir türü kendi efektif tavanının üzerine
+            # taşıyorsa vazgeç -- tavan her tür için bağımsızdır.
             if any(tur_sayaci[t2] >= tavan_efektif[t2] for t2 in turleri if t2 != tur and t2 in tur_sayaci):
                 continue
             secilen_anomalili.add(fno)
@@ -439,29 +398,20 @@ def anomali_turu_kotali_sec(
                     tur_sayaci[t2] += 1
             alinan += 1
 
-    # Küçük bir hedef_toplam (ör. kalibrasyon denemesi) verilirse, tür
-    # kotalarının bağımsız toplamı hedefin tamamını (hatta üstünü) doldurup
-    # temiz faturaya hiç yer bırakmayabilir. Bu durumda anomalili kümeyi
-    # hedef bandın (temiz_orani_min/max'ın tümleyeni) tavanına göre kırpar,
-    # çeşitliliği koruyarak -- kırpma olduysa rapor bunu açıkça işaretler.
+    # Küçük bir hedef_toplam'da tür kotalarının toplamı hedefin tamamını doldurup
+    # temize yer bırakmayabilir; anomalili küme hedef bandın tavanına, çeşitlilik
+    # korunarak kırpılır (kırpma olduysa rapor işaretler).
     anomali_ust_sinir = int(hedef_toplam * (1 - temiz_orani_min))
     anomalili_kirpildi = len(secilen_anomalili) > anomali_ust_sinir
     if anomalili_kirpildi:
-        # Kırparken de kategori hedefini gözet: kotası AÇIK olanları koru,
-        # fazlalığı doymuş kategorilerden at (rastgele kırpmak manipulatif gibi
-        # dar bir ekseni hedefin altına düşürürdü).
+        # Kırparken kategori hedefini gözet: kotası AÇIK olanı koru, fazlalığı
+        # doymuş kategoriden at (rastgele kırpma manipulatifi hedefin altına atardı).
         kirpma_sirasi = _cesitli_sira(list(secilen_anomalili), fatura_map, rnd)
         if kategori_hedefli:
             tutulan: Counter = Counter()
 
-            # Kırpma YALNIZ kategori eksenine bakar. Nadirlik ikinci anahtar
-            # olarak DENENDİ ve GERİ ALINDI (2026-07-29): 'nadir türe ait olanı
-            # tut' kuralı, havuzu büyük ama TEK-ETİKETLİ türleri (ör.
-            # dusuk_ondalik_kaymasi, havuz 2287) sıralamanın sonuna atıyor;
-            # kategori ekseni de onları (temiz dağılımlı oldukları için) geri
-            # ittiğinden tür 561'den 22'ye çöktü. İki anahtar aynı yöne
-            # bindiğinde bir türü tamamen eleyebiliyor -- kırpma tek eksende
-            # kalmalı, tür dengesini asıl kota döngüsü kuruyor zaten.
+            # Kırpma TEK eksende kalmalı; nadirlik ikinci anahtar olarak denendi ve
+            # geri alındı (tek-etiketli türleri sona atıp çökertiyordu).
             def _kirpma_anahtari(fno: str) -> int:
                 kat = etiket_map[fno]["aciklama_kategorisi"]
                 tutulan[kat] += 1
@@ -477,17 +427,13 @@ def anomali_turu_kotali_sec(
     temiz_hedef = max(0, min(hedef_toplam - anomalili_sayisi, len(temiz_no)))
 
     if kategori_hedefli:
-        # TEMİZ doldurma da kategori KATMANLI: anomalili taraftan sonra her
-        # kategoride kalan açık kadar temiz fatura çekilir, açık kapanmazsa
-        # (havuzda o kategoriden yeterli temiz yoksa) zorlanmaz -- eksik rapora
-        # yazılır. Katman içi seçim yine _cesitli_ornekle ile (iş kolu/tutar
-        # çeşitliliği korunur).
+        # TEMİZ doldurma da kategori KATMANLI: her kategoride kalan açık kadar temiz
+        # çekilir, havuz yetmezse zorlanmaz (eksik rapora yazılır).
         temiz_kat: dict[str, list[str]] = {}
         for fno in temiz_no:
             temiz_kat.setdefault(etiket_map[fno]["aciklama_kategorisi"], []).append(fno)
         secilen_temiz = []
-        # Dar kategoriler (manipulatif) ÖNCE: geniş olanlar toplam kotayı
-        # kapmadan kendi açıklarını kapatabilsinler.
+        # Dar kategoriler (manipulatif) ÖNCE: geniş olanlar toplam kotayı kapmasın.
         for kat in sorted(temiz_kat, key=lambda k: len(temiz_kat[k])):
             acik = kategori_hedefi.get(kat, 0) - kategori_sayaci[kat]
             if acik <= 0:
@@ -498,8 +444,7 @@ def anomali_turu_kotali_sec(
             pay = _cesitli_ornekle(temiz_kat[kat], fatura_map, alinacak, rnd)
             secilen_temiz.extend(pay)
             kategori_sayaci[kat] += len(pay)
-        # Hedefler karşılandıktan sonra hâlâ yer varsa (kategori havuzları
-        # tükendiyse) kalanı doğal dağılımdan tamamla.
+        # Hedefler karşılandıktan sonra yer kaldıysa kalanı doğal dağılımdan tamamla.
         if len(secilen_temiz) < temiz_hedef:
             kalanlar = [f for f in temiz_no if f not in set(secilen_temiz)]
             secilen_temiz.extend(
@@ -511,15 +456,9 @@ def anomali_turu_kotali_sec(
     tum_secilen_no = list(secilen_anomalili) + secilen_temiz
     rnd.shuffle(tum_secilen_no)
 
-    # KATEGORİ OVERRIDE VARSAYILAN OLARAK KAPALI (bilinçli karar).
-    # `_kategori_kotali_yeniden_ata` batch kompozisyonunu 50/20/20/10'a çekmek için
-    # aciklama_kategorisi'ni yeniden atıyordu; ölçüldü (20k): 4107 fatura (%20.5)
-    # override ediliyordu -- en sık "temiz + yeterli -> manipulatif" (1241 fatura).
-    # Bu, generators/aciklama_uretici.ACIKLAMA_KATEGORI_ORANLARI'nın araştırmayla
-    # kalibre edilmiş anomali↔kategori korelasyonunu bozar; ayrıca override edilen
-    # kategori etiket dosyasına GERİ YAZILMADIĞI için (aciklama_birlestir.py bu alana
-    # hiç dokunmaz) metin ile etiket/onay_durumu çelişir hale gelirdi.
-    # Açıkça istenirse --kategori-override ile açılabilir.
+    # KATEGORİ OVERRIDE VARSAYILAN KAPALI: etiketi yeniden atamak Faz A'nın kalibre
+    # anomali↔kategori korelasyonunu bozar, ayrıca yeni kategori etiket dosyasına
+    # geri yazılmadığı için metin ile etiket çelişirdi (--kategori-override ile açılır).
     if kategori_override:
         yeni_kategoriler, kategori_override_sayisi = _kategori_kotali_yeniden_ata(
             tum_secilen_no, etiket_map, hedef_kategori_oranlari, rnd
@@ -552,8 +491,7 @@ def anomali_turu_kotali_sec(
             "hedefin_altinda": yetersiz,
         }
 
-    # aciklama_kategorisi (yeterli/yetersiz/manipulatif/ai_uretimi) dağılımı --
-    # _kategori_kotali_yeniden_ata sonrası (override uygulanmış) SONUÇ.
+    # Nihai aciklama_kategorisi dağılımı (override açıksa onun sonucu).
     kategori_sayaci = Counter(s["aciklama_kategorisi"] for s in secilenler)
     kategori_raporu = {
         kategori: {"adet": adet, "oran": round(adet / toplam, 4) if toplam else 0.0}
