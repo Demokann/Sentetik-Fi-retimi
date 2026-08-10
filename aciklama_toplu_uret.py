@@ -111,6 +111,13 @@ def main():
              "durum.json'a YAZMAZ (paylaşımlı dosya, makineler birbirini ezerdi); "
              "resume yine çalışır çünkü asıl durum batch_NNNN_ciktilar.json'dadır.",
     )
+    parser.add_argument(
+        "--dedup-taban", action="append", metavar="DIZIN",
+        help="ÖNCEKİ koşuların çıktı dizini; yakın-kopya birikimini tohumlar. "
+             "Birden fazla kez verilebilir. Ek/dengeleme koşusu AYRI dizinde "
+             "çalıştığında bunu VERMEZSEN önceki metinlerin kopyaları bayraksız "
+             "kalır. Yalnız okunur, taban dizine yazılmaz.",
+    )
     parser.add_argument("--insan-md", action="store_true", help="İnsan incelemesi için ayrıca MD raporu yaz")
     parser.add_argument("--ilerleme", type=int, default=1000,
                         help="Her N kayıtta bir STDERR'e kilometre taşı bas (0 = kapalı). "
@@ -180,6 +187,28 @@ def main():
     kabul_token_setleri: dict[str, list[set[str]]] = {k: [] for k in KATEGORILER}
     kategori_metinleri: dict[str, list[str]] = {k: [] for k in KATEGORILER}
     yakin_kopya_sayaci = 0
+    # Birikim normalde sıfırdan başlar ve yalnız BU dizinin çıktılarından
+    # beslenir; ayrı dizinde koşan ek üretim önceki metinleri göremez ve
+    # kopyaları bayraksız kalır. Taban dizinler yalnız OKUNUR.
+    # Beklenen yan etki: tohumlanmış koşuda yakın-kopya oranı yükselir (daha
+    # önce görülmeyen gerçek çakışmalar görünür olur), hedef adedi ona göre seç.
+    for taban in args.dedup_taban or []:
+        tohum = 0
+        for yol in sorted(Path(taban).glob("batch_*_ciktilar.json")):
+            with open(yol, "r", encoding="utf-8") as f:
+                for _k in json.load(f).values():
+                    _kat, _m = _k.get("aciklama_kategorisi"), _k.get("aciklama_metni")
+                    if _kat in kabul_token_setleri and _m:
+                        # YALNIZ dedup birikimi. `kategori_metinleri` koşu sonu
+                        # çeşitlilik raporunda kullanılıyor; onu tohumlamak
+                        # raporu bozar (rapor bu koşuyu ölçmeli, tohumu değil).
+                        kabul_token_setleri[_kat].append(_token_set(_m))
+                        tohum += 1
+        if tohum:
+            dagilim = ", ".join(f"{k}={len(v)}" for k, v in sorted(kabul_token_setleri.items()) if v)
+            print(f"[+] dedup tohumu: {taban} -> {tohum} metin ({dagilim})")
+        else:
+            print(f"[!] dedup tohumu BOŞ: {taban} (yol yanlış olabilir, KONTROL ET)")
     # Model burst boyunca bellekte kalsın; cooldown başında explicit indireceğiz.
     keep_alive = f"{int(args.cooldown_min * 60) + 300}s"
 
