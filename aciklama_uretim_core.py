@@ -3331,13 +3331,25 @@ def _tek_fatura_vs(fatura, etiket, model, host, keep_alive, kategori,
 # yoksa yalnızca üslup kusuru mu. Üslup kusurları (pasif_kalip, uzunluk)
 # veri setinin doğal gürültüsüdür, ELENMEZ.
 ELEME_IHLALLERI: frozenset[str] = frozenset({
-    "enum_sizinti",     # sistem kategori adı metinde
     "meta_sizinti",     # görevi/karakteri anlatıyor (ground-truth sızıntısı)
     "sizinti",          # kategori/talimat sızıntısı
     "latin_disi",       # bozuk çıktı
     "red",              # model görevi reddetti
     "kesik",            # cümle ortadan kesilmiş
 })
+
+# Yalnız BELİRLİ kategorilerde eleyen ihlaller.
+# `enum_sizinti` (sistem kategori adı metinde) `yeterli`/`manipulatif`te leakage
+# DEĞİL: kalemin `harcama_kategorisi` alanı zaten model girdisinde, metnin "ofis
+# mobilyası aldım" demesi modele yeni bilgi vermiyor ve cümle doğal Türkçe. O iki
+# kategoride "ne için alındı" bilgisini gizlemek zaten istemiyoruz (§9).
+# `yetersiz`te ise kategorinin TANIMINI bozuyor: baştan savma not ne aldığını
+# söylememeli. Genel ad havuzu (`_KATEGORI_GENEL_AD`) bu kategoride zaten
+# alternatif sunuyor ve 13 genel adın hiçbiri bu kuralı tetiklemiyor (ölçüldü),
+# yani ihlal kalan vakalar ipucunun kullanılmadığı vakalardır.
+ELEME_IHLALLERI_KATEGORILI: dict[str, frozenset[str]] = {
+    "enum_sizinti": frozenset({"yetersiz"}),
+}
 
 # 'kategori' kelimesinin kendisi ve çekimli biçimleri. Doğal bir masraf notunda
 # fiilen hiç geçmez (bu yüzden yanlış-pozitif riski ihmal edilebilir), ama
@@ -3358,19 +3370,28 @@ def _kategori_kavrami_sizintisi_mi(metin: str) -> bool:
     return bool(_KATEGORI_KAVRAMI.search(_tr_normalize(metin)))
 
 
-def elenmeli_mi(metin: str, kalan_ihlaller: list[str] | None = None) -> tuple[bool, str]:
+def elenmeli_mi(metin: str, kalan_ihlaller: list[str] | None = None,
+                kategori: str | None = None) -> tuple[bool, str]:
     """(elenmeli_mi, sebep). Sebep raporlamada gruplanır; elenmezse ("", ) döner.
 
     Boru hattında SON adımda çağrılır (aciklama_birlestir.py). Üretim/retry
     akışını etkilemez -- amaç düzeltmek değil, kötü kaydı veri setine
-    SOKMAMAKTIR."""
+    SOKMAMAKTIR.
+
+    `kategori` verilirse `ELEME_IHLALLERI_KATEGORILI` uygulanır; verilmezse
+    kategori koşullu ihlaller HER kategoride eler (alan taşımayan eski çıktı
+    dosyalarında davranış değişmesin diye)."""
     if not metin or not metin.strip():
         return True, "bos_metin"
     if _kategori_kavrami_sizintisi_mi(metin):
         return True, "kategori_kavrami"
-    sert = sorted(set(kalan_ihlaller or []) & ELEME_IHLALLERI)
+    ihlaller = set(kalan_ihlaller or [])
+    sert = ihlaller & ELEME_IHLALLERI
+    for ihlal, kategoriler in ELEME_IHLALLERI_KATEGORILI.items():
+        if ihlal in ihlaller and (kategori is None or kategori in kategoriler):
+            sert.add(ihlal)
     if sert:
-        return True, "ihlal:" + ",".join(sert)
+        return True, "ihlal:" + ",".join(sorted(sert))
     return False, ""
 
 

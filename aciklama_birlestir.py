@@ -28,18 +28,17 @@ def aciklama_haritasi_kur(dizin: Path, eleme: bool = False) -> tuple[dict[str, s
     Anahtar fatura_no DEĞİL: mukerrer_fis_yukleme / fatura_no_cakismasi anomalilerinde
     ayni fatura_no iki kayitta bulunur ve her birinin KENDİ açiklamasi vardir.
 
-    ⚠️ KALİTE SÜZGECİ ŞU AN KAPALIDIR (varsayılan `eleme=False`, 2026-07-29
-    kararı). Kod ileride geliştirilmek üzere duruyor; `--eleme` ile açılır.
-    Açıldığında `aciklama_uretim_core.elenmeli_mi` uygulanır: retry'dan sağ
-    çıkan şema-sızıntısı ihlalleri ve kategori-kavramı sızıntısı taşıyan
-    kayıtlar veri setine hiç girmez.
+    KALİTE SÜZGECİ varsayılan KAPALIDIR; `--eleme` ile açılır. Açıldığında
+    `aciklama_uretim_core.elenmeli_mi` uygulanır: retry'dan sağ çıkan
+    şema-sızıntısı ihlalleri ve kategori-kavramı sızıntısı taşıyan kayıtlar
+    veri setine hiç girmez.
 
-    AÇMADAN ÖNCE ÇÖZÜLMESİ GEREKEN: `ELEME_IHLALLERI` içindeki `enum_sizinti`
-    bir LEAKAGE değil ÜSLUP kuralıdır (kalemin `harcama_kategorisi`'si zaten
-    model girdisinde) ve yanlış-pozitif üretiyor -- pilotta elenen 4 kaydın
-    biri kusursuz bir `yeterli` örneğiydi ("Yeni çalışanım için yazılım
-    lisansı aldım."). Kayıp `yeterli`de yoğunlaştığı için (%37,5) sınıf
-    dengesini de bozuyor. Ölçüm: enum dahil %16 eleme, hariç %3.
+    `enum_sizinti`'nin `yeterli`/`manipulatif`te yanlış-pozitif olması
+    (kalemin `harcama_kategorisi`'si zaten model girdisinde) artık kuralın
+    kendisinde çözülü: o ihlal `ELEME_IHLALLERI_KATEGORILI` ile yalnız
+    `yetersiz`te eler. Kayda `aciklama_kategorisi` yazılmamış eski çıktı
+    dosyalarında eski davranış (her kategoride eler) sürer.
+    Ölçüldü (25k): tam eleme 1.009 kayıt, kategori duyarlı eleme 122.
 
     Prompt'a kural eklemek yerine burada elemenin gerekçesi: yeni prompt
     kuralı retry maliyeti ve çeşitlilik kaybı getiriyor (docs/arsiv/faz-b-prompt.md
@@ -54,7 +53,8 @@ def aciklama_haritasi_kur(dizin: Path, eleme: bool = False) -> tuple[dict[str, s
         for kid, kayit in cikti.items():
             metin = kayit["aciklama_metni"]
             if eleme:
-                at, sebep = elenmeli_mi(metin, kayit.get("kalan_ihlaller"))
+                at, sebep = elenmeli_mi(metin, kayit.get("kalan_ihlaller"),
+                                        kayit.get("aciklama_kategorisi"))
                 if at:
                     elenen[sebep] += 1
                     continue
