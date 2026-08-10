@@ -20,6 +20,7 @@ import random
 from collections import Counter
 from pathlib import Path
 
+from aciklama_uretim_core import ILISKISEL_ANOMALILER
 from generators.aciklama_uretici import (
     ONCELIK_SIRASI, ACIKLAMA_KATEGORILERI, ACIKLAMA_KATEGORI_ORANLARI,
     VARSAYILAN_TEKNIK_ORAN, _belirleyici_turu_sec,
@@ -270,6 +271,85 @@ def _konteyner_tavanlarini_hesapla(
     return {tur: tur_tavan + ekstra_butce[tur] for tur in turler}
 
 
+def _cift_butunlugunu_sagla(
+    secilen_anomalili: set[str],
+    secilen_temiz: list[str],
+    etiket_map: dict[str, dict],
+    fatura_map: dict[str, dict],
+    rnd: random.Random,
+) -> dict:
+    """Iliskisel etiketli her kaydin `(satici_vkn, fatura_no)` esini secime ekler.
+
+    Kota secimi tur farkindali ama CIFT farkindali degildi: etiketli uyeyi bilincli
+    aliyor, esi ise siradan bir TEMIZ fatura oldugu icin hicbir kotaya girmeden
+    yalniz dolgu oraniyla geliyordu. Olculdu (25k): 584 mukerrer kaydin 459'u,
+    366 cakisma kaydinin 294'u essiz kalmis, yani karsilastirmali bir model icin
+    cozulemez hale gelmisti.
+
+    Eklenen es tasidigi TUM turlerin kotasindan duser (tek etiketli kayitla ayni
+    muhasebe; oncelik agirligi YOK, yoksa ikinci turun orani gercekten sahip
+    oldugundan sapardi). Toplam sabit kalsin diye es sayisi kadar dolgu temiz
+    kayit cikarilir, AYNI kategoriden -- kompozisyon kaymasin.
+
+    Tavan denetimi bu adimda UYGULANMAZ: cift butunlugu dogruluk sarti, tavan
+    ise denge sezgiseli. Asim sinirli, eslerin ~%75'i temiz ve hicbir ture
+    girmiyor. Rapor asimi gorunur kilar.
+
+    Anahtar `(satici_vkn, fatura_no)`: yalniz `fatura_no` dogal cakismalari da
+    cift sayardi (CLAUDE.md §7)."""
+    anahtar: dict[tuple, list[str]] = {}
+    for kid, f in fatura_map.items():
+        anahtar.setdefault((f["satici_vkn"], f["fatura_no"]), []).append(kid)
+
+    secili = set(secilen_anomalili) | set(secilen_temiz)
+    eklenecek: dict[str, str] = {}
+    # Dolgudan CIKARILAMAYACAK kayitlar: secilmis iliskisel kayitlarin TUM esleri.
+    # Yalniz yeni eklenenleri korumak yetmiyor -- sansa zaten secilmis bir esi
+    # dolgu diye cikarinca sahibi oksuz kaliyordu (olculdu: 10 kayit).
+    korunacak: set[str] = set()
+    for kid in secilen_anomalili:
+        if not set(etiket_map[kid]["anomali_turleri"]) & set(ILISKISEL_ANOMALILER):
+            continue
+        f = fatura_map[kid]
+        for es in anahtar.get((f["satici_vkn"], f["fatura_no"]), []):
+            if es == kid:
+                continue
+            korunacak.add(es)
+            if es not in secili and es not in eklenecek:
+                eklenecek[es] = kid
+
+    rapor = {"eklenen_es": len(eklenecek), "es_anomalili": 0, "cikarilan_dolgu": 0}
+    if not eklenecek:
+        return rapor
+
+    # Cikarilacak dolgu, eklenen esin kategorisiyle ESLESTIRILIR; rastgele
+    # cikarmak `manipulatif` gibi dar bir ekseni hedefin altina dusururdu.
+    dolgu_kat: dict[str, list[str]] = {}
+    for kid in secilen_temiz:
+        dolgu_kat.setdefault(etiket_map[kid]["aciklama_kategorisi"], []).append(kid)
+    for grup in dolgu_kat.values():
+        rnd.shuffle(grup)
+
+    cikarilacak: set[str] = set()
+    for es in eklenecek:
+        havuz = dolgu_kat.get(etiket_map[es]["aciklama_kategorisi"]) or []
+        while havuz:
+            aday = havuz.pop()
+            if aday not in korunacak and aday not in cikarilacak:
+                cikarilacak.add(aday)
+                break
+
+    for es in eklenecek:
+        if etiket_map[es]["is_anomali"]:
+            secilen_anomalili.add(es)
+            rapor["es_anomalili"] += 1
+        else:
+            secilen_temiz.append(es)
+    secilen_temiz[:] = [k for k in secilen_temiz if k not in cikarilacak]
+    rapor["cikarilan_dolgu"] = len(cikarilacak)
+    return rapor
+
+
 def anomali_turu_kotali_sec(
     faturalar: list[dict],
     etiketler: list[dict],
@@ -453,6 +533,11 @@ def anomali_turu_kotali_sec(
     else:
         secilen_temiz = _cesitli_ornekle(temiz_no, fatura_map, temiz_hedef, rnd)
 
+    cift_raporu = _cift_butunlugunu_sagla(
+        secilen_anomalili, secilen_temiz, etiket_map, fatura_map, rnd
+    )
+    anomalili_sayisi = len(secilen_anomalili)
+
     tum_secilen_no = list(secilen_anomalili) + secilen_temiz
     rnd.shuffle(tum_secilen_no)
 
@@ -511,6 +596,7 @@ def anomali_turu_kotali_sec(
         "tur_bazli": tur_raporu,
         "hedefin_altinda_kalan_turler": hedefin_altinda_kalanlar,
         "aciklama_kategorisi_dagilimi": kategori_raporu,
+        "cift_butunlugu": cift_raporu,
     }
     return secilenler, rapor
 
@@ -535,6 +621,13 @@ def _kota_raporu_yazdir(rapor: dict) -> None:
     bant = rapor["hedef_anomali_orani_araligi"]
     uyari = " [!] BANDIN DISINDA" if rapor["anomali_orani_bandin_disinda"] else ""
     print(f"[+] Anomali orani: {rapor['anomali_orani']:.3f}  (hedef bant: {bant[0]:.2f}-{bant[1]:.2f}){uyari}")
+
+    cift = rapor["cift_butunlugu"]
+    print(
+        f"\n[+] Cift butunlugu: {cift['eklenen_es']} es eklendi "
+        f"({cift['es_anomalili']} anomalili, {cift['eklenen_es'] - cift['es_anomalili']} temiz); "
+        f"yerine {cift['cikarilan_dolgu']} dolgu temiz kayit cikarildi."
+    )
 
     hedef_kat = rapor["aciklama_kategorisi_hedef_oranlari"]
     print("\n[+] aciklama_kategorisi dagilimi (secilen alt kumede, hedefle kiyasla):")

@@ -1081,7 +1081,6 @@ MANIPULATIF_VURGU_IPUCLARI = [
     "Kılı kırk yararak söylüyorum, iş için",
     "Dosdoğru iş amaçlı",
     "Adı üstünde şirket gideri",
-    "Elimi vicdanıma koyarak iş için",
     "Kesin olarak departman ihtiyacı",
     "Yüzde yüz ekip gideri",
     "Bütünüyle iş kapsamında",
@@ -3368,6 +3367,32 @@ def _kategori_kavrami_sizintisi_mi(metin: str) -> bool:
     çünkü orada aranan şey kategori ADIdır ('yemek hizmeti'), burada geçen ise
     'kategori' kelimesinin kendisi."""
     return bool(_KATEGORI_KAVRAMI.search(_tr_normalize(metin)))
+
+
+# Esi olmadan COZULEMEYEN anomaliler: fisin mukerrer oldugu kendi alanlarindan
+# degil, esinin varligindan anlasilir.
+ILISKISEL_ANOMALILER = ("mukerrer_fis_yukleme", "fatura_no_cakismasi")
+
+
+def iliskisel_cift_idleri(faturalar: list[dict], etiket_map: dict[str, dict]) -> set[str]:
+    """Iliskisel bir ciftte yer alan TUM kayit_id'ler: etiketli uye + esi.
+
+    Eleme bu kumeye DOKUNMAMALI. Cift bir arada olmazsa anomali cozulemez hale
+    gelir; birkac sema sizintili metni veri setinde tutmak, ilistkisel bir ornegi
+    kaybetmekten ucuzdur (o ornek icin uretim zaten harcandi).
+
+    Anahtar `(satici_vkn, fatura_no)`: yalniz `fatura_no` dogal cakismalari da
+    cift sayardi (CLAUDE.md §7)."""
+    anahtar: dict[tuple, list[str]] = {}
+    for f in faturalar:
+        anahtar.setdefault((f["satici_vkn"], f["fatura_no"]), []).append(f["kayit_id"])
+    korunan: set[str] = set()
+    for f in faturalar:
+        etiket = etiket_map.get(f["kayit_id"])
+        if not etiket or not set(etiket["anomali_turleri"]) & set(ILISKISEL_ANOMALILER):
+            continue
+        korunan.update(anahtar[(f["satici_vkn"], f["fatura_no"])])
+    return korunan
 
 
 def elenmeli_mi(metin: str, kalan_ihlaller: list[str] | None = None,
