@@ -21,6 +21,7 @@ import argparse
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
+from cift_grup import cift_grup_anahtari
 
 VARSAYILAN_GIRDI_JSON = "data/faturalar_aciklamali.json"
 ILISKISEL_ANOMALILER = ("mukerrer_fis_yukleme", "fatura_no_cakismasi")
@@ -63,7 +64,7 @@ def main() -> None:
     gr = {f["kayit_id"]: f for f in faturalar}
     anahtar: dict[tuple, list[str]] = defaultdict(list)
     for f in faturalar:
-        anahtar[(f["satici_vkn"], f["fatura_no"])].append(f["kayit_id"])
+        anahtar[cift_grup_anahtari(f)].append(f["kayit_id"])
 
     eksik: dict[str, str] = {}   # es kayit_id -> hangi anomali yuzunden cekildi
     sayac = Counter()
@@ -73,7 +74,7 @@ def main() -> None:
         if not iliskisel:
             continue
         f = gr[kid]
-        for es in anahtar[(f["satici_vkn"], f["fatura_no"])]:
+        for es in anahtar[cift_grup_anahtari(f)]:
             if es != kid and es not in mevcut and es not in eksik:
                 eksik[es] = sorted(iliskisel)[0]
                 sayac[sorted(iliskisel)[0]] += 1

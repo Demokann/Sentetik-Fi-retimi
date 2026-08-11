@@ -16,6 +16,7 @@ cift sayardi (farkli saticilar ayni numarayi kullanabilir).
 
 import argparse
 import json
+from cift_grup import cift_grup_anahtari, kayit_imzasi
 import shutil
 from collections import Counter, defaultdict
 
@@ -23,12 +24,7 @@ VARSAYILAN_GIRDI_JSON = "data/faturalar_aciklamali.json"
 VARSAYILAN_ETIKET_JSON = "data/faturalar_aciklamali_etiketler.json"
 HEDEF_ANOMALILER = ("mukerrer_fis_yukleme", "fatura_no_cakismasi")
 
-IMZA_DISI_ALANLAR = {"kayit_id", "aciklama_metni"}
-
-
-def imza(fatura: dict) -> str:
-    return json.dumps({k: v for k, v in fatura.items() if k not in IMZA_DISI_ALANLAR},
-                      sort_keys=True, ensure_ascii=False)
+imza = kayit_imzasi
 
 
 def main() -> None:
@@ -59,7 +55,7 @@ def main() -> None:
     anahtar_kume: dict[tuple, list[str]] = defaultdict(list)
     imza_kume: dict[str, list[str]] = defaultdict(list)
     for r in girdiler:
-        anahtar_kume[(r["satici_vkn"], r["fatura_no"])].append(r["kayit_id"])
+        anahtar_kume[cift_grup_anahtari(r)].append(r["kayit_id"])
         imza_kume[imza(r)].append(r["kayit_id"])
 
     print(f"[+] {len(girdiler)} kayit okundu ({args.girdi_json})\n")
@@ -71,7 +67,7 @@ def main() -> None:
         esli, kopya = [], []
         for kid in kayitlar:
             r = gr[kid]
-            if len(anahtar_kume[(r["satici_vkn"], r["fatura_no"])]) > 1:
+            if len(anahtar_kume[cift_grup_anahtari(r)]) > 1:
                 esli.append(kid)
             if len(imza_kume[imza(r)]) > 1:
                 kopya.append(kid)
@@ -84,7 +80,7 @@ def main() -> None:
         sayac = Counter()
         for kid in esli:
             r = gr[kid]
-            for es in anahtar_kume[(r["satici_vkn"], r["fatura_no"])]:
+            for es in anahtar_kume[cift_grup_anahtari(r)]:
                 if es != kid:
                     sayac["+".join(sorted(et[es]["anomali_turleri"])) or "(temiz)"] += 1
         print(f"  {anomali}:")
@@ -131,7 +127,7 @@ def main() -> None:
             print(f"  {anomali}:")
             for kid in esli[:args.ornek]:
                 r = gr[kid]
-                grup = anahtar_kume[(r["satici_vkn"], r["fatura_no"])]
+                grup = anahtar_kume[cift_grup_anahtari(r)]
                 for k in grup:
                     e = et[k]
                     print(f"      {k}  no={gr[k]['fatura_no']}  tutar={gr[k]['genel_toplam']}  "

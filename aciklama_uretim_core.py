@@ -15,6 +15,7 @@ import time
 import requests
 from collections import Counter
 from pathlib import Path
+from cift_grup import cift_grup_anahtari
 
 OLLAMA_HOST_VARSAYILAN = "http://localhost:11434"
 MODEL_VARSAYILAN = "qwen3:8b"
@@ -3385,13 +3386,13 @@ def iliskisel_cift_idleri(faturalar: list[dict], etiket_map: dict[str, dict]) ->
     cift sayardi (CLAUDE.md §7)."""
     anahtar: dict[tuple, list[str]] = {}
     for f in faturalar:
-        anahtar.setdefault((f["satici_vkn"], f["fatura_no"]), []).append(f["kayit_id"])
+        anahtar.setdefault(cift_grup_anahtari(f), []).append(f["kayit_id"])
     korunan: set[str] = set()
     for f in faturalar:
         etiket = etiket_map.get(f["kayit_id"])
         if not etiket or not set(etiket["anomali_turleri"]) & set(ILISKISEL_ANOMALILER):
             continue
-        korunan.update(anahtar[(f["satici_vkn"], f["fatura_no"])])
+        korunan.update(anahtar[cift_grup_anahtari(f)])
     return korunan
 
 
