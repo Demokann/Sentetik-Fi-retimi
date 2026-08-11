@@ -12,6 +12,7 @@ from generators.field_generator import (
     ACIKLAMA_HAVUZU, rastgele_birim, birim_sec, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura,
     mutfak_anahtari,
     firma_kisit_anahtari,
+    mukerrer_yukleme_zamanlari,
 )
 
 
@@ -277,6 +278,8 @@ def genel_toplam_anomali_uret(fatura: Fatura) -> Fatura:
     return AnomaliliFatura(
         fatura_no=fatura.fatura_no,
         fatura_tarihi=fatura.fatura_tarihi,
+        yukleme_zamani=fatura.yukleme_zamani,
+        saat=fatura.saat,
         satici_vkn=fatura.satici_vkn,
         satici_unvan=fatura.satici_unvan,
         alici_vkn=fatura.alici_vkn,
@@ -315,6 +318,8 @@ def footer_kismi_anomali_uret(fatura: Fatura) -> Fatura:
     return AnomaliliFatura(
         fatura_no=fatura.fatura_no,
         fatura_tarihi=fatura.fatura_tarihi,
+        yukleme_zamani=fatura.yukleme_zamani,
+        saat=fatura.saat,
         satici_vkn=fatura.satici_vkn,
         satici_unvan=fatura.satici_unvan,
         alici_vkn=fatura.alici_vkn,
@@ -546,9 +551,22 @@ def _mukerrer_fis_yukleme_uygula(f1: Fatura, f2: Fatura) -> Fatura:
     beklemek gerçekçi olmaz. Bu ayni zamanda veri setini zorlaştirir: yapisal
     alanlar birebir ayni, metin farkli -> model mükerrerliği METİNDEN değil
     yapidan öğrenmek zorunda kalir."""
+    # SIRA ONEMLI: kopya f1 ETIKETLENMEDEN alinir, yoksa turu iki kez tasir.
     kopya = f1.model_copy(deep=True)
     kopya.is_anomali = True
     kopya.anomali_turleri = list(f1.anomali_turleri) + ["mukerrer_fis_yukleme"]
+
+    # Cift SIMETRIK etiketlenir: `anomali_turleri` OLAYI isaretler ("bu kayit bir
+    # mukerrerlik olayinin parcasi"), kayit bazli karari `onay_durumu` verir
+    # (once yuklenen onaylanabilir, sonra yuklenen asla). Tek uyeyi etiketlemek
+    # neredeyse ozdes iki kayda zit etiket vermek demekti.
+    f1.is_anomali = True
+    if "mukerrer_fis_yukleme" not in f1.anomali_turleri:
+        f1.anomali_turleri = list(f1.anomali_turleri) + ["mukerrer_fis_yukleme"]
+
+    # Kopya daha GEC yuklenir; iki an tek tabandan simetrik turetilir.
+    f1.yukleme_zamani, kopya.yukleme_zamani = mukerrer_yukleme_zamanlari(
+        f1.fatura_tarihi, f1.yukleme_zamani)
     return kopya
 
 
@@ -581,6 +599,14 @@ def _fatura_no_cakismasi_uygula(f1: Fatura, f2: Fatura) -> Fatura:
     turler = [t for t in f2.anomali_turleri if t not in HEADER_KAPSAMLI_ANOMALILER]
     turler += [t for t in HEADER_KAPSAMLI_ANOMALILER if t in f1.anomali_turleri]
     f2.anomali_turleri = turler + ["fatura_no_cakismasi"]
+
+    # Cift SIMETRIK etiketlenir (bkz. _mukerrer_fis_yukleme_uygula). Cakismada
+    # iki fis de ayni numaralandirma hatasinin parcasidir; suc saticinindir,
+    # dolayisiyla `onay_durumu` ikisine de red DEGIL gozden_gecirilecek verir.
+    f1.is_anomali = True
+    if "fatura_no_cakismasi" not in f1.anomali_turleri:
+        f1.anomali_turleri = list(f1.anomali_turleri) + ["fatura_no_cakismasi"]
+    # `yukleme_zamani`'na DOKUNULMAZ: iki farkli fis, iki bagimsiz yukleme.
     return f2
 
 def karisik_veri_seti_uret(adet: int, anomali_orani: float) -> list[Fatura]:

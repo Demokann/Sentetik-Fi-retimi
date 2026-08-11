@@ -17,6 +17,8 @@ def fatura_to_dict(fatura) -> dict:
         "kayit_id": fatura.kayit_id,   # benzersiz satir anahtari (join icin; ÖZELLİK DEĞİL)
         "fatura_no": fatura.fatura_no,
         "fatura_tarihi": fatura.fatura_tarihi,
+        "yukleme_zamani": fatura.yukleme_zamani,   # model girdisi, leakage DEĞİL
+        "saat": fatura.saat,                       # fişin üzerinde basılı
         "satici_vkn": fatura.satici_vkn,
         "satici_unvan": fatura.satici_unvan,
         "is_kolu": fatura.is_kolu.value,   # model girdisi -- leakage DEĞİL (gerçek

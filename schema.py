@@ -182,6 +182,16 @@ class Fatura(BaseModel):
     kayit_id: str = ""
     fatura_no: str
     fatura_tarihi: str
+    # Fisin sisteme yuklendigi an (ISO 8601, +03:00). MODEL GIRDISIDIR, leakage
+    # DEGIL: gercek bir masraf uygulamasi yukleme anini bilir. `gelecek_tarihli`
+    # enjeksiyonu fatura_tarihi'ni SONRADAN ileri attigi icin o kayitlarda
+    # yukleme < fatura tarihi cikar; anomalinin tanimi zaten budur.
+    yukleme_zamani: str = ""
+    # Fisin uzerinde BASILI saat (HH:MM). Faz A'da uretilir, `fis_uret` yalnizca
+    # okur. Uretimde dogmasinin sebebi: mukerrer kopya `model_copy` ile alindigi
+    # icin ayni saati DEVRALIR -- render tarafindaki imza/tohum esleme mekanizmasi
+    # (fis_uret.saat_tohumlari_kur) gereksizlesir.
+    saat: str = ""
     satici_vkn: str  # 10 haneli
     satici_unvan: str
     alici_vkn: str

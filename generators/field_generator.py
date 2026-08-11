@@ -2,7 +2,7 @@ import uuid
 import random
 from decimal import Decimal
 from faker import Faker
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from schema import IS_KOLU_KATEGORILERI, HarcamaKategorisi, FaturaKalemi, Fatura, IsKolu, FirmaTuru, KDV_ORANI_MAP
 from politika import kalem_limiti
 import re, math, unicodedata
@@ -1960,6 +1960,100 @@ def rastgele_tarih(gun_araligi: int = 90) -> str:
     return tarih.isoformat()  # "2026-06-15" formatinda
 
 
+# --- yukleme_zamani -------------------------------------------------------
+# Gecikme TEK dagilimdan cekilir; temiz/anomalili ayrimi YAPILMAZ, aksi halde
+# "gecikme uzunsa anomali" kestirme yolu acilir. Olculdu (24k): gecikmeden
+# is_anomali'ye AUC 0,50.
+YUKLEME_GECIKME_BANTLARI = [(0, 1, 40), (2, 7, 30), (8, 21, 20), (22, 45, 10)]
+# Mukerrer ciftte iki yukleme arasi (gun). 0 = ayni gun, saatler farkli.
+YUKLEME_ARALIK_BANTLARI = [(0, 0, 40), (1, 1, 35), (2, 3, 15), (4, 7, 10)]
+YUKLEME_SAAT_AGIRLIKLARI = {
+    0: 0.2, 1: 0.1, 2: 0.1, 3: 0.1, 4: 0.1, 5: 0.2, 6: 0.5, 7: 1.5,
+    8: 3.0, 9: 8.0, 10: 9.5, 11: 9.0, 12: 4.5, 13: 7.0, 14: 9.0, 15: 9.0,
+    16: 8.5, 17: 7.5, 18: 5.0, 19: 3.0, 20: 2.5, 21: 2.0, 22: 1.2, 23: 0.6,
+}
+# Tarihlerin 2/7'si hafta sonuna duser; hedef pay %12 -> %58'i is gunune kayar.
+YUKLEME_HAFTA_SONU_KALMA = 0.42
+TR_SAAT_DILIMI = timezone(timedelta(hours=3))
+
+
+def _yukleme_bant_sec(bantlar, tavan: int) -> int:
+    uygun = [(a, min(b, tavan), w) for a, b, w in bantlar if a <= tavan]
+    if not uygun:
+        return max(0, tavan)
+    a, b, _ = random.choices(uygun, weights=[w for *_, w in uygun], k=1)[0]
+    return random.randint(a, b)
+
+
+def _yukleme_ani_kur(fatura_tarihi: date, gecikme: int) -> str:
+    """Gecikme gunu + is saati sekillendirmesi -> ISO 8601 zaman damgasi."""
+    bugun = date.today()
+    gun = fatura_tarihi + timedelta(days=gecikme)
+    if gun.weekday() >= 5 and random.random() >= YUKLEME_HAFTA_SONU_KALMA:
+        ileri = gun + timedelta(days=7 - gun.weekday())          # Pazartesi
+        geri = gun - timedelta(days=gun.weekday() - 4)           # Cuma
+        gun = ileri if ileri <= bugun else (geri if geri >= fatura_tarihi else gun)
+    saat = random.choices(list(YUKLEME_SAAT_AGIRLIKLARI),
+                          weights=list(YUKLEME_SAAT_AGIRLIKLARI.values()), k=1)[0]
+    return datetime(gun.year, gun.month, gun.day, saat, random.randrange(60),
+                    tzinfo=TR_SAAT_DILIMI).isoformat()
+
+
+def rastgele_yukleme_zamani(fatura_tarihi: str) -> str:
+    """Fisin sisteme yuklendigi an. Fatura tarihinden sonra, bugunu asmaz."""
+    tarih = date.fromisoformat(fatura_tarihi)
+    tavan = max(0, (date.today() - tarih).days)
+    return _yukleme_ani_kur(tarih, _yukleme_bant_sec(YUKLEME_GECIKME_BANTLARI, tavan))
+
+
+YUKLEME_ASGARI_ARALIK = timedelta(hours=1)
+
+
+def _gun_sonu(ornek: datetime) -> datetime:
+    return datetime.combine(date.today(), time(23, 59), tzinfo=ornek.tzinfo)
+
+
+def mukerrer_yukleme_zamanlari(fatura_tarihi: str, f1_zamani: str) -> tuple[str, str]:
+    """Mukerrer cift icin (erken, gec) yukleme ani.
+
+    Taban gecikme BIR KEZ cekilir, aralik taban etrafinda SIMETRIK bolunur.
+    Asimetrik ekleme (f1 = taban, f2 = taban + aralik) kopyalari gecikme
+    dagiliminin sagina kaydirip tek kayda bakan modele zayif bir sinyal
+    birakiyordu; simetrik bolmede ciftin havuz ortalamasi yerinde kalir."""
+    tarih = date.fromisoformat(fatura_tarihi)
+    tavan = (date.today() - tarih).days
+    if tavan < 0:
+        # `gelecek_tarihli` enjekte edilmis: fatura tarihi CAPA OLAMAZ, yukleme
+        # ondan ONCE olmali (anomalinin tanimi). f1'in mevcut ani korunur.
+        an = datetime.fromisoformat(f1_zamani)
+        gec = an + timedelta(days=_yukleme_bant_sec(YUKLEME_ARALIK_BANTLARI, 7),
+                             hours=random.randint(1, 12))
+        gec = min(gec, _gun_sonu(an))
+    else:
+        taban = _yukleme_bant_sec(YUKLEME_GECIKME_BANTLARI, tavan)
+        aralik = _yukleme_bant_sec(YUKLEME_ARALIK_BANTLARI, 7)
+        ikisi = sorted((
+            datetime.fromisoformat(_yukleme_ani_kur(tarih, max(0, taban - aralik // 2))),
+            datetime.fromisoformat(_yukleme_ani_kur(tarih, min(tavan, taban + (aralik - aralik // 2)))),
+        ))
+        an, gec = ikisi
+
+    # Asgari aralik: `aralik` 0 gun cikan ciftlerde iki saat cekimi dakikalara
+    # kadar yaklasabiliyor. Once kopya ileri itilir, tavana dayanirsa f1 geri cekilir.
+    if gec - an < YUKLEME_ASGARI_ARALIK:
+        if an + YUKLEME_ASGARI_ARALIK <= _gun_sonu(an):
+            gec = an + YUKLEME_ASGARI_ARALIK
+        else:
+            an = gec - YUKLEME_ASGARI_ARALIK
+    return an.isoformat(), gec.isoformat()
+
+
+def rastgele_saat() -> str:
+    """Fisin uzerindeki saat (08:00-20:59). Etiketle KORELASYONSUZ olmali:
+    saati anomaliye/kategoriye baglamak gorsele sahte sinyal ekler."""
+    return f"{random.randint(8, 20):02d}:{random.randrange(60):02d}"
+
+
 def rastgele_fatura_no(fatura_tarihi: str) -> str:
     """
     GİB e-fatura standardina uygun 16 haneli fatura no üretir:
@@ -2122,6 +2216,8 @@ def rastgele_fatura() -> Fatura:
     return Fatura(
         fatura_no=fatura_no,
         fatura_tarihi=fatura_tarihi,
+        yukleme_zamani=rastgele_yukleme_zamani(fatura_tarihi),
+        saat=rastgele_saat(),
         satici_vkn=satici_kimlik,
         satici_unvan=satici_adi,
         alici_vkn=ALICI_VKN_SABIT,
