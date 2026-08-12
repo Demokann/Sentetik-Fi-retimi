@@ -436,6 +436,29 @@ def veri_seti_dogrula(faturalar: list[Fatura], hedef_oran: float, tolerans: floa
         if turler_sayaci.get(isim, 0) == 0:
             uyarilar.append(f"Anomali türü hiç üretilmemiş: {isim}")
 
+    # Alan alan Fatura kuran enjektörler (AnomaliliFatura) yeni alanlari tasimayi
+    # unutabiliyor; alan o zaman sessizce bos kalir (olculdu: yukleme_zamani,
+    # 482/12000). Yeni bir zorunlu alan eklendiginde BURAYA da ekle.
+    for alan in ("yukleme_zamani", "saat"):
+        bos = sum(1 for f in faturalar if not getattr(f, alan, ""))
+        if bos:
+            uyarilar.append(
+                f"{alan} BOŞ olan {bos} fatura var; bir anomali enjektörü alani "
+                f"tasimiyor (AnomaliliFatura kurucularina bak)."
+            )
+
+    # Iliskisel cift SIMETRIK etiketlenmeli: tur OLAYI isaretler, kayit bazli
+    # karari onay_durumu verir. Tek uye etiketliyse enjektorde regresyon var.
+    ciftler: dict[tuple, list[Fatura]] = {}
+    for f in faturalar:
+        ciftler.setdefault((f.satici_vkn, f.fatura_no), []).append(f)
+    for tur in ("mukerrer_fis_yukleme", "fatura_no_cakismasi"):
+        asimetrik = sum(1 for uyeler in ciftler.values() if len(uyeler) > 1
+                        and 0 < sum(tur in f.anomali_turleri for f in uyeler) < len(uyeler))
+        if asimetrik:
+            uyarilar.append(f"{tur}: {asimetrik} çiftte yalniz BİR üye etiketli "
+                            f"(çift simetrik etiketlenmeli).")
+
     return uyarilar
 
 def dogrulama_raporu_olustur(faturalar: list[Fatura]) -> dict:
