@@ -34,6 +34,8 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, Template
 from playwright.sync_api import sync_playwright
 
+from cift_grup import cift_grup_anahtari, kayit_imzasi
+
 
 def kimlik_etiketi(kimlik_no: str) -> str:
     """10 haneliyse VKN, 11 haneliyse TCKN etiketi döndürür."""
@@ -116,15 +118,7 @@ def saat_uret(tohum: str) -> str:
     return f"{8 + h % 13:02d}:{(h // 13) % 60:02d}"
 
 
-# `saat_tohumlari_kur`un özdeşlik imzasindan DIŞLANAN alanlar: fişin üstünde
-# BASILMAYAN, dolayisiyla iki görselin ayni olup olmadigini belirlemeyen alanlar.
-#   kayit_id      -- çiftin tanimi geregi tek farki; imzaya girerse hiçbir şey eşleşmez.
-#   aciklama_metni-- Faz B çiktisi. Mükerrer çiftte KASITLI olarak farklidir
-#                    (bkz. anomaly_injector._mukerrer_fis_yukleme_uygula: ayni fişi
-#                    ikinci kez yükleyen çalişan sifirdan not yazar). Fişe basilmaz.
-# Girdi olarak `faturalar_aciklamali.json` verildiğinde bu alan olmadan eşleşme
-# 1496'dan 0'a düşüyordu -- yani düzeltme sessizce devre disi kaliyordu.
-IMZA_DISI_ALANLAR = {"kayit_id", "aciklama_metni"}
+# Imza alanlari cift_grup'ta (fis_uret ve mukerrer.py ayni tanimi paylasir).
 
 
 def saat_tohumlari_kur(faturalar: list[dict]) -> dict[str, str]:
@@ -156,7 +150,7 @@ def saat_tohumlari_kur(faturalar: list[dict]) -> dict[str, str]:
     """
     gruplar: dict[tuple[str, str], list[dict]] = {}
     for f in faturalar:
-        gruplar.setdefault((f["satici_vkn"], f["fatura_no"]), []).append(f)
+        gruplar.setdefault(cift_grup_anahtari(f), []).append(f)
 
     tohumlar: dict[str, str] = {}
     aday_grup = 0
@@ -167,8 +161,7 @@ def saat_tohumlari_kur(faturalar: list[dict]) -> dict[str, str]:
         # IMZA_DISI alanlarin disindakilerin imzasina göre kümele.
         kumeler: dict[str, list[str]] = {}
         for f in kayitlar:
-            imza = json.dumps({k: v for k, v in f.items() if k not in IMZA_DISI_ALANLAR},
-                              sort_keys=True, ensure_ascii=False)
+            imza = kayit_imzasi(f)
             kumeler.setdefault(imza, []).append(f["kayit_id"])
         for kimlikler in kumeler.values():
             if len(kimlikler) > 1:
@@ -215,7 +208,9 @@ def baglam_kur(fatura: dict, saat_tohumlari: dict[str, str] | None = None) -> di
     baglam["satici_kimlik_etiketi"] = kimlik_etiketi(fatura["satici_vkn"])
     baglam["kalemler"] = [kalem_gosterimi(k) for k in fatura["kalemler"]]
     baglam["fatura_tarihi_tr"] = tarih_tr(fatura["fatura_tarihi"])
-    baglam["saat"] = saat_uret(tohum)
+    # `saat` Faz A'da uretilir (2026-08-11). GERIYE DONUK YOL: alani tasimayan
+    # eski veri (ornegin data/final_veriler) tohum mekanizmasiyla render edilir.
+    baglam["saat"] = fatura.get("saat") or saat_uret(tohum)
     baglam["kdv_gruplari"] = kdv_gruplari_kur(fatura["kalemler"])
     return baglam
 
@@ -229,9 +224,42 @@ def sablon_sec(fatura: dict, sablonlar: list[Template]) -> Template:
     return sablonlar[_kayit_hash(fatura["kayit_id"]) % len(sablonlar)]
 
 
+BOLMELER = ("egitim", "dogrulama", "test")
+
+
+def fisleri_uret(faturalar, output_dir: Path, sablonlar, saat_tohumlari, sayfa,
+                 yeniden: bool) -> tuple[int, int, int]:
+    """Bir fatura listesini render eder. Doner: (uretilen, atlanan, hatali)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    uretilen = atlanan = hatali = 0
+    for i, fatura in enumerate(faturalar, start=1):
+        # Dosya adi KAYIT_ID: `fatura_no` tasarim geregi MUKERRER olabilir
+        # (CLAUDE.md §7) ve sira numarasi girdi dosyasina gore kayar.
+        cikti_yolu = output_dir / f"{fatura['kayit_id']}.png"
+        if cikti_yolu.exists() and not yeniden:
+            atlanan += 1
+            continue
+        try:
+            sablon = sablon_sec(fatura, sablonlar)
+            sayfa.set_content(sablon.render(**baglam_kur(fatura, saat_tohumlari)))
+            sayfa.locator(".receipt-container").screenshot(path=str(cikti_yolu))
+            uretilen += 1
+        except Exception as e:
+            # Tek bozuk kayit uzun kosuyu dusurmesin.
+            hatali += 1
+            print(f"  [X] {fatura['kayit_id']}: {type(e).__name__}: {e}")
+        if i % 500 == 0:
+            print(f"  {i}/{len(faturalar)} islendi (uretilen {uretilen}, atlanan {atlanan})")
+    return uretilen, atlanan, hatali
+
+
 def main():
     parser = argparse.ArgumentParser(description="JSON faturalardan fiş (receipt) görseli üretir")
-    parser.add_argument("--input-json", required=True, help="faturalar.json dosya yolu")
+    parser.add_argument("--input-json", help="faturalar.json dosya yolu (--bolme-dizini yoksa ZORUNLU)")
+    parser.add_argument("--bolme-dizini", default=None,
+                        help="veri_bol.py çıktı dizini. Verilirse üç bölme sırayla "
+                             "render edilir: <b>_girdi.json -> <b>_gorsel/. Saat "
+                             "tohumları üç bölmenin BİRLEŞİMİNDEN hesaplanır.")
     parser.add_argument("--output-dir", default="data/fisler", help="Görsellerin kaydedileceği klasör")
     parser.add_argument("--template", default="fis_sablon_1.html,fis_sablon_2.html",
                         help="Jinja2 şablon yolu/yolları (virgülle ayır). Birden fazlaysa her "
@@ -246,24 +274,38 @@ def main():
                              "fiş tam koşudakinden FARKLI saat alır.")
     args = parser.parse_args()
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not args.bolme_dizini and not args.input_json:
+        parser.error("--input-json ya da --bolme-dizini ver.")
 
-    with open(args.input_json, "r", encoding="utf-8") as f:
-        faturalar = json.load(f)
+    def yukle(yol):
+        with open(yol, "r", encoding="utf-8") as f:
+            return json.load(f)
 
-    # Tohumlar --limit'ten ÖNCE, tam havuzdan hesaplanir: dilim mükerrer çiftin
-    # bir üyesini disarda birakirsa saat tam koşudakinden farkli çikardi.
-    if args.tohum_json:
-        with open(args.tohum_json, "r", encoding="utf-8") as f:
-            saat_tohumlari = saat_tohumlari_kur(json.load(f))
+    # isler: (etiket, faturalar, cikti_dizini)
+    if args.bolme_dizini:
+        kaynak = Path(args.bolme_dizini)
+        isler = [(b, yukle(kaynak / f"{b}_girdi.json"), kaynak / f"{b}_gorsel")
+                 for b in BOLMELER]
+        tohum_havuzu = [f for _, fs, _ in isler for f in fs]
     else:
-        saat_tohumlari = saat_tohumlari_kur(faturalar)
-    print(f"Saat tohumu eşlenen kayıt: {len(saat_tohumlari)} "
-          f"({len(set(saat_tohumlari.values()))} mükerrer yükleme kümesi)")
+        isler = [("", yukle(args.input_json), Path(args.output_dir))]
+        tohum_havuzu = isler[0][1]
+
+    # Tohumlar --limit'ten ONCE ve TAM havuzdan: dilim mukerrer ciftin bir uyesini
+    # disarda birakirsa saat tam kosudakinden farkli cikar. Bolme kipinde havuz
+    # uc bolmenin birlesimidir, yani zaten tam veri seti.
+    if args.tohum_json:
+        tohum_havuzu = yukle(args.tohum_json)
+    if all(f.get("saat") for f in tohum_havuzu):
+        saat_tohumlari = {}
+        print("Saat verisi faturada VAR; tohum eşlemesi gerekmedi.")
+    else:
+        saat_tohumlari = saat_tohumlari_kur(tohum_havuzu)
+        print(f"Saat tohumu eşlenen kayıt: {len(saat_tohumlari)} "
+              f"({len(set(saat_tohumlari.values()))} mükerrer yükleme kümesi)")
 
     if args.limit:
-        faturalar = faturalar[: args.limit]
+        isler = [(ad, fs[: args.limit], d) for ad, fs, d in isler]
 
     yollar = [Path(y.strip()) for y in args.template.split(",") if y.strip()]
     dizinler = sorted({str(y.parent or Path(".")) for y in yollar})
@@ -271,41 +313,24 @@ def main():
     env.filters["tutar"] = tutar_formatla
     sablonlar = [env.get_template(y.name) for y in yollar]
 
-    print(f"{len(faturalar)} fatura için fiş üretiliyor "
+    toplam = sum(len(fs) for _, fs, _ in isler)
+    print(f"{toplam} fatura için fiş üretiliyor "
           f"({len(sablonlar)} şablon: {', '.join(y.name for y in yollar)})...")
 
     uretilen = atlanan = hatali = 0
     with sync_playwright() as p:
         tarayici = p.chromium.launch()
         sayfa = tarayici.new_page()
-
-        for i, fatura in enumerate(faturalar, start=1):
-            # Dosya adi KAYIT_ID: `fatura_no` tasarim gereği MÜKERRER olabilir
-            # (mukerrer_fis_yukleme / fatura_no_cakismasi, CLAUDE.md §7) ve
-            # siralama numarasi girdi dosyasina/--limit'e göre kayar. Görselin
-            # etiket dosyasindaki satira bağlanabilmesi için tek güvenli
-            # anahtar kayit_id'dir.
-            cikti_yolu = output_dir / f"{fatura['kayit_id']}.png"
-            if cikti_yolu.exists() and not args.yeniden:
-                atlanan += 1
-                continue
-
-            try:
-                sablon = sablon_sec(fatura, sablonlar)
-                sayfa.set_content(sablon.render(**baglam_kur(fatura, saat_tohumlari)))
-                sayfa.locator(".receipt-container").screenshot(path=str(cikti_yolu))
-                uretilen += 1
-            except Exception as e:
-                # Tek bozuk kayit 25k'lik koşuyu düşürmesin.
-                hatali += 1
-                print(f"  [X] {fatura['kayit_id']}: {type(e).__name__}: {e}")
-
-            if i % 500 == 0:
-                print(f"  {i}/{len(faturalar)} işlendi (üretilen {uretilen}, atlanan {atlanan})")
-
+        for ad, faturalar, dizin in isler:
+            if ad:
+                print(f"\n--- {ad.upper()}: {len(faturalar)} fatura -> {dizin}/")
+            u, a, h = fisleri_uret(faturalar, dizin, sablonlar, saat_tohumlari,
+                                   sayfa, args.yeniden)
+            uretilen, atlanan, hatali = uretilen + u, atlanan + a, hatali + h
         tarayici.close()
 
-    print(f"Tamamlandi: {uretilen} fis -> {output_dir}/")
+    hedefler = ", ".join(str(d) for _, _, d in isler)
+    print(f"\nTamamlandi: {uretilen} fis -> {hedefler}")
     if atlanan:
         print(f"  {atlanan} fis zaten vardi, atlandi (--yeniden ile zorla).")
     if hatali:
