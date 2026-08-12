@@ -290,9 +290,6 @@ def fatura_dogrula(fatura: Fatura, bugun_str: str) -> list[str]:
     if not kimlik_no_dogrula(fatura.satici_vkn):
         hatalar.append(f"Geçersiz satici kimlik no: {fatura.satici_vkn}")
 
-    if not kimlik_no_dogrula(fatura.alici_vkn):
-        hatalar.append(f"Geçersiz alici kimlik no: {fatura.alici_vkn}")
-
     if tarih_gelecekte_mi(fatura.fatura_tarihi, bugun_str):
         hatalar.append(f"Gelecek tarihli fatura: {fatura.fatura_tarihi}")
 
@@ -529,11 +526,8 @@ def raporu_yazdir(rapor: dict) -> None:
     print(f"  Toplam Fatura       : {rapor['toplam_fatura']}")
     print(f"  Geçerli Fatura      : {rapor['gecerli_fatura_sayisi']}")
     print(f"  Hatali Fatura       : {rapor['hatali_fatura_sayisi']}")
+    # Liste basilmaz (binlerce çift); tam hali rapor JSON'unda.
     print(f"  Tekrar Eden Fatura No: {len(rapor['fatura_no_tekrarlari'])}")
-
-    if rapor["fatura_no_tekrarlari"]:
-        print(f"\n  Tekrar eden no'lar: {rapor['fatura_no_tekrarlari']}")
-
 
     vkn_firma = rapor.get("vkn_firma_tutarsizliklari", {})
     ayni_vkn_farkli_ad = vkn_firma.get("ayni_vkn_farkli_ad", {})

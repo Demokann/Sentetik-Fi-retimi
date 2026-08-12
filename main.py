@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 from validators import (
     dogrulama_raporu_olustur, raporu_yazdir, vkn_firma_tutarlilik_hatalarini_bul,
-    kural_ihlali_turlerini_tespit_et,
+    kural_ihlali_turlerini_tespit_et, veri_seti_dogrula,
 )
 from generators.field_generator import rastgele_fatura
 from generators.anomaly_injector import karisik_veri_seti_uret
@@ -24,8 +24,6 @@ def fatura_to_dict(fatura) -> dict:
         "is_kolu": fatura.is_kolu.value,   # model girdisi -- leakage DEĞİL (gerçek
         # masraf sisteminde satıcının sektörü zaten bilinir). Registry mimarisiyle
         # is_kolu artık kimlikten geri-okunmaz, doğrudan taşınır.
-        "alici_vkn": fatura.alici_vkn,
-        "alici_unvan": fatura.alici_unvan,
         "toplam_vergisiz_tutar": float(fatura.toplam_vergisiz_tutar),   # yeni
         "toplam_kdv_tutari": float(fatura.toplam_kdv_tutari),            # yeni
         "toplam_iskonto": float(fatura.toplam_iskonto),                  # yeni
@@ -96,8 +94,6 @@ def csv_olarak_kaydet(faturalar: list[dict], dosya_yolu: Path) -> None:
                 "fatura_tarihi": fatura["fatura_tarihi"],
                 "satici_vkn": fatura["satici_vkn"],
                 "satici_unvan": fatura["satici_unvan"],
-                "alici_vkn": fatura["alici_vkn"],
-                "alici_unvan": fatura["alici_unvan"],
                 **kalem,
                 "fatura_genel_toplam": fatura["genel_toplam"],
             })
@@ -192,6 +188,16 @@ def main():
     rapor["talep_edilen_fatura_adedi"] = args.count
     rapor["elenen_fatura_sayisi_vkn_tutarsizlik"] = elenen_fatura_sayisi
     raporu_yazdir(rapor)
+
+    # Union etiketlemeden SONRA çağrilmali; yalniz uyarir, üretimi durdurmaz.
+    uyarilar = veri_seti_dogrula(fatura_nesneleri, args.anomali_orani)
+    rapor["veri_seti_uyarilari"] = uyarilar
+    if uyarilar:
+        print(f"\n[!] VERİ SETİ UYARILARI ({len(uyarilar)}):")
+        for u in uyarilar:
+            print(f"    - {u}")
+    else:
+        print("\n[+] Veri seti invariant kontrolü temiz (uyari yok).")
 
     faturalar = [fatura_to_dict(f) for f in fatura_nesneleri]
 
