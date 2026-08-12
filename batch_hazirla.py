@@ -21,10 +21,30 @@ from collections import Counter
 from pathlib import Path
 
 from aciklama_uretim_core import ILISKISEL_ANOMALILER
+from cift_grup import cift_grup_anahtari
+
 from generators.aciklama_uretici import (
     ONCELIK_SIRASI, ACIKLAMA_KATEGORILERI, ACIKLAMA_KATEGORI_ORANLARI,
     VARSAYILAN_TEKNIK_ORAN, _belirleyici_turu_sec,
 )
+
+# ILISKISEL TURLERDE BIRIM KAYIT DEGIL OLAYDIR (2026-08-11). Enjektor ciftin iki
+# uyesini de etiketledigi icin bir mukerrerlik OLAYI sette IKI kayit tutar; kotayi
+# kayit cinsinden yazmak o turleri digerlerinin iki kati sisirir (olculdu: 24k
+# sette mukerrer 1168, dengelenmis turler 522).
+#
+# Dongu tur basina bu kadar KAYIT alir, `_cift_butunlugunu_sagla` eksik esleri
+# sonradan tamamlar; dolayisiyla nihai OLAY sayisi [tavan/2, tavan] araligindadir.
+#
+# OLCEKLEME: uretim hacmi buyuyup --tur-taban/--tur-tavan yukseltilirse BUNLAR DA
+# elle yukseltilmeli. Referans oran (25k kosusu): tur 400/600 kayit iken iliskisel
+# 300/400 olay, yani nihai kayit olarak dengelenmis turlerin ~1,5 kati.
+ILISKISEL_TABAN = 300
+ILISKISEL_TAVAN = 400
+
+# Batch, havuzun bu oranindan fazlasini alirsa hedef kategori kompozisyonu
+# tutmaz (darbogaz manipulatif; gerekce docs/dökümantasyon/nasıl-calisir.md).
+GUVENLI_HAVUZ_ORANI = 0.25
 
 VARSAYILAN_CIKTI_DIZINI = "data/aciklama"
 
@@ -295,11 +315,10 @@ def _cift_butunlugunu_sagla(
     ise denge sezgiseli. Asim sinirli, eslerin ~%75'i temiz ve hicbir ture
     girmiyor. Rapor asimi gorunur kilar.
 
-    Anahtar `(satici_vkn, fatura_no)`: yalniz `fatura_no` dogal cakismalari da
-    cift sayardi (CLAUDE.md §7)."""
+    Anahtar `cift_grup.cift_grup_anahtari` (CLAUDE.md §7)."""
     anahtar: dict[tuple, list[str]] = {}
     for kid, f in fatura_map.items():
-        anahtar.setdefault((f["satici_vkn"], f["fatura_no"]), []).append(kid)
+        anahtar.setdefault(cift_grup_anahtari(f), []).append(kid)
 
     secili = set(secilen_anomalili) | set(secilen_temiz)
     eklenecek: dict[str, str] = {}
@@ -311,7 +330,7 @@ def _cift_butunlugunu_sagla(
         if not set(etiket_map[kid]["anomali_turleri"]) & set(ILISKISEL_ANOMALILER):
             continue
         f = fatura_map[kid]
-        for es in anahtar.get((f["satici_vkn"], f["fatura_no"]), []):
+        for es in anahtar.get(cift_grup_anahtari(f), []):
             if es == kid:
                 continue
             korunacak.add(es)
@@ -356,6 +375,8 @@ def anomali_turu_kotali_sec(
     hedef_toplam: int = 20000,
     tur_taban: int = 300,
     tur_tavan: int = 600,
+    iliskisel_taban: int = ILISKISEL_TABAN,
+    iliskisel_tavan: int = ILISKISEL_TAVAN,
     temiz_orani_min: float = 0.70,
     temiz_orani_max: float = 0.75,
     hedef_kategori_oranlari: dict[str, float] | None = None,
@@ -411,6 +432,12 @@ def anomali_turu_kotali_sec(
 
     # Konteyner türlere (ör. footer_kismi) veriden otomatik ek tavan bütçesi.
     tavan_efektif = _konteyner_tavanlarini_hesapla(tur_havuzlari, tur_taban, tur_tavan)
+    # Iliskisel turlerde birim OLAY (bkz. ILISKISEL_TAVAN). Ciftin IKI uyesi de
+    # etiketli oldugu icin bir olay havuzda 2 kayit tutar; dongunun kayit tavani
+    # bu yuzden 2x. Olculdu: 1x verilince nihai olay tavanin yarisinda kaliyordu.
+    for _t in ILISKISEL_ANOMALILER:
+        if _t in tavan_efektif:
+            tavan_efektif[_t] = 2 * iliskisel_tavan
 
     # tur_sayaci: bir türden GERÇEKTE kaç fatura seçildiği (union nedeniyle başka
     # bir türün turunda seçilse de sayılır). Tavan bunun üzerinden KATI uygulanır;
@@ -564,13 +591,14 @@ def anomali_turu_kotali_sec(
     hedefin_altinda_kalanlar: list[str] = []
     for tur, havuz in tur_havuzlari.items():
         secilen_bu_tur = sum(1 for fno in secilen_anomalili if tur in etiket_map[fno]["anomali_turleri"])
-        yetersiz = secilen_bu_tur < tur_taban
+        _taban = 2 * iliskisel_taban if tur in ILISKISEL_ANOMALILER else tur_taban
+        yetersiz = secilen_bu_tur < _taban
         if yetersiz:
             hedefin_altinda_kalanlar.append(tur)
         tur_raporu[tur] = {
             "mevcut_havuzda": len(havuz),
             "secilen": secilen_bu_tur,
-            "taban": tur_taban,
+            "taban": _taban,
             "tavan": tavan_efektif[tur],
             "konteyner": tavan_efektif[tur] > tur_tavan,
             "hedefin_altinda": yetersiz,
@@ -585,6 +613,8 @@ def anomali_turu_kotali_sec(
 
     rapor = {
         "toplam_secilen": toplam,
+        "havuz_boyutu": len(faturalar),
+        "havuz_orani": round(toplam / len(faturalar), 4) if faturalar else 0.0,
         "anomalili_sayisi": anomalili_sayisi,
         "anomalili_kirpildi": anomalili_kirpildi,
         "temiz_sayisi": len(secilen_temiz),
@@ -636,6 +666,19 @@ def _kota_raporu_yazdir(rapor: dict) -> None:
         print(
             f"      {kategori:12s}: {bilgi['adet']:5d}  (%{bilgi['oran']*100:5.1f}, hedef %{hedef_oran*100:.0f})"
         )
+    # Hedef kompozisyonun darbogazi manipulatif: havuzun ~%6,5'i manipulatif ve
+    # secim bunun ancak ~%78'ini cikarabiliyor, batch ise %20 istiyor. Batch
+    # havuzun dortte birini gecince yetismiyor (olculdu: %25 -> %19,8, %30 ->
+    # %16,9, %40 -> %12,5). Sessiz kalirsa sapma ancak gozle fark edilir.
+    if rapor["havuz_orani"] > GUVENLI_HAVUZ_ORANI:
+        print(
+            f"\n[!] Batch havuzun %{rapor['havuz_orani']*100:.0f}'ini aliyor "
+            f"(guvenli tavan %{GUVENLI_HAVUZ_ORANI*100:.0f}): "
+            f"{rapor['toplam_secilen']} / {rapor['havuz_boyutu']}.\n"
+            f"    Manipulatif hedefin altinda kalabilir. Havuzu buyut ya da "
+            f"--toplam'i dusur; tablo icin docs/dökümantasyon/nasıl-calisir.md."
+        )
+
     toplam_secilen = rapor["toplam_secilen"]
     override_orani = rapor["aciklama_kategorisi_override_sayisi"] / toplam_secilen if toplam_secilen else 0.0
     print(
@@ -660,6 +703,10 @@ def main():
     parser.add_argument("--min-per-kategori", type=int, default=2500, help="[kategori modu] Nadir sınıflar için taban örnek sayısı")
     parser.add_argument("--tur-taban", type=int, default=300, help="[kota modu] Anomali türü başına hedeflenen taban")
     parser.add_argument("--tur-tavan", type=int, default=600, help="[kota modu] Anomali türü başına izin verilen tavan")
+    parser.add_argument("--iliskisel-taban", type=int, default=ILISKISEL_TABAN,
+                        help="[kota modu] Iliskisel turlerde taban -- birim OLAY (cift), kayit degil")
+    parser.add_argument("--iliskisel-tavan", type=int, default=ILISKISEL_TAVAN,
+                        help="[kota modu] Iliskisel turlerde tavan -- birim OLAY (cift), kayit degil")
     parser.add_argument("--temiz-orani-min", type=float, default=0.70, help="[kota modu] Alt kümede hedeflenen minimum temiz oranı")
     parser.add_argument("--temiz-orani-max", type=float, default=0.75, help="[kota modu] Alt kümede hedeflenen maksimum temiz oranı")
     parser.add_argument("--kategori-oran-yeterli", type=float, default=VARSAYILAN_KATEGORI_HEDEF_ORANLARI["yeterli"], help="[kota modu] aciklama_kategorisi hedef oranı: yeterli")
@@ -710,6 +757,8 @@ def main():
             hedef_toplam=args.toplam,
             tur_taban=args.tur_taban,
             tur_tavan=args.tur_tavan,
+            iliskisel_taban=args.iliskisel_taban,
+            iliskisel_tavan=args.iliskisel_tavan,
             temiz_orani_min=args.temiz_orani_min,
             temiz_orani_max=args.temiz_orani_max,
             hedef_kategori_oranlari=hedef_kategori_oranlari,
@@ -772,6 +821,8 @@ def main():
             "min_per_kategori": args.min_per_kategori,
             "tur_taban": args.tur_taban,
             "tur_tavan": args.tur_tavan,
+            "iliskisel_taban": args.iliskisel_taban,
+            "iliskisel_tavan": args.iliskisel_tavan,
             "temiz_orani_min": args.temiz_orani_min,
             "temiz_orani_max": args.temiz_orani_max,
             "kategori_oran_yeterli": args.kategori_oran_yeterli,
