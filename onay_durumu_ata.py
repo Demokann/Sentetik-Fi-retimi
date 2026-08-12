@@ -24,6 +24,21 @@ Yani: anomali varsa DOĞRUDAN RED (teknik/davranissal ayrimi yapilmaz).
 Anomali yoksa yalniz `yeterli` onaylanir; diger üç açiklama kategorisi
 incelemeye düser.
 
+CIFT KURALI (2026-08-11) -- yukaridaki tablonun TEK istisnasi. Sira
+`yukleme_zamani`'ndan okunur; `cift_grup_id` hiçbir zaman model girdisine girmez.
+
+    mukerrer, once yuklenen   ek anomali var        -> onaylanmadi
+    mukerrer, once yuklenen   yalniz mukerrer + yeterli    -> ONAYLANDI
+    mukerrer, once yuklenen   yalniz mukerrer + digeri     -> gozden_gecirilecek
+    mukerrer, sonra yuklenen  her halde             -> onaylanmadi
+    cakisma, iki uye de       ek anomali var        -> onaylanmadi
+    cakisma, iki uye de       ek anomali yok        -> gozden_gecirilecek
+
+"once yuklenen + yeterli -> onaylandi" satiri, anomali etiketli bir kaydin onay
+aldigi TEK durumdur: unutkanlik senaryosunda ilk yukleme kusursuzdur, suc ikinci
+yuklemededir. Cakismada hiç red YOKTUR (ek anomali disinda): numaralandirma
+hatasi saticinindir, çalisanin görüs alani disinda.
+
 Önceki kural (A/B grubu × kategori, 12 hücreli tablo) BIRAKILDI: B-grubu teknik
 hatalar "muhasebe düzeltir, onaylar" varsayimiyla gozden_gecirilecek'e düsüyordu.
 Yeni kuralda anomalinin kaynagi (calisan mi, sistem mi) onay kararini degistirmez;
@@ -58,6 +73,9 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from cift_grup import cift_grup_id, ciftleri_bul
+from iliskisel_es_etiketle import ILISKISEL_TURLER, esleri_etiketle
+
 VARSAYILAN_CIKTI_DIZINI = "data/aciklama"
 VARSAYILAN_ETIKET_JSON = "data/faturalar_etiketler.json"
 VARSAYILAN_OUTPUT_JSON = "data/faturalar_aciklamali_etiketler.json"
@@ -91,6 +109,41 @@ def uretilen_kayitlari_yukle(dizin: Path) -> dict[str, dict]:
     return kayitlar
 
 
+def cift_kararlari(girdi_map: dict[str, dict], kategori_map: dict[str, str],
+                   tur_map: dict[str, set]) -> tuple[dict[str, str], int]:
+    """Cift uyelerinin onay_durumu'u. Tablo modül docstring'inde.
+
+    Sira `yukleme_zamani`'ndan okunur; alani eksik olan cift ATLANIR (temel
+    kurala düser) ve sayisi raporlanir -- sessizce yanlis sira uydurmaktansa."""
+    kayitlar = [girdi_map[k] for k in kategori_map if k in girdi_map]
+    karar: dict[str, str] = {}
+    sirasiz = 0
+    for uyeler in ciftleri_bul(kayitlar).values():
+        turler = {k: tur_map[k] for k in uyeler}
+        ortak = set().union(*turler.values()) & ILISKISEL_TURLER
+        if not ortak:
+            continue
+        if any(not girdi_map[k].get("yukleme_zamani") for k in uyeler):
+            sirasiz += 1
+            continue
+        if "mukerrer_fis_yukleme" in ortak:
+            sirali = sorted(uyeler, key=lambda k: girdi_map[k]["yukleme_zamani"])
+            once = sirali[0]
+            if turler[once] - {"mukerrer_fis_yukleme"}:
+                karar[once] = "onaylanmadi"
+            elif kategori_map[once] == "yeterli":
+                karar[once] = "onaylandi"
+            else:
+                karar[once] = "gozden_gecirilecek"
+            for k in sirali[1:]:
+                karar[k] = "onaylanmadi"
+        else:
+            for k in uyeler:
+                karar[k] = ("onaylanmadi" if turler[k] - {"fatura_no_cakismasi"}
+                            else "gozden_gecirilecek")
+    return karar, sirasiz
+
+
 def girdiyle_hizala(uretilen: dict[str, dict], girdi_json: str) -> dict[str, dict]:
     """Model girdisinde OLMAYAN kayitlari düser.
 
@@ -117,6 +170,7 @@ def girdiyle_hizala(uretilen: dict[str, dict], girdi_json: str) -> dict[str, dic
 
 
 def etiketleri_uret(etiketler: list[dict], uretilen: dict[str, dict],
+                    girdi_map: dict[str, dict],
                     tum_kayitlar: bool = False) -> tuple[list[dict], dict]:
     """Açiklamasi ÜRETİLMİŞ kayitlar için onay_durumu'lu etiket listesi + rapor.
 
@@ -134,6 +188,22 @@ def etiketleri_uret(etiketler: list[dict], uretilen: dict[str, dict],
     dagilim = Counter()
     capraz = Counter()
 
+    # 1. gecis: etkin kategori ve tur kumeleri (cift karari ikisine de muhtac)
+    kategori_map: dict[str, str] = {}
+    tur_map: dict[str, set] = {}
+    for etiket in etiketler:
+        kayit = uretilen.get(etiket["kayit_id"])
+        if kayit is None:
+            continue
+        kategori = kayit.get("aciklama_kategorisi") or etiket.get("aciklama_kategorisi", "")
+        if kategori != etiket.get("aciklama_kategorisi"):
+            kategori_uyusmazligi += 1
+        kategori_map[etiket["kayit_id"]] = kategori
+        tur_map[etiket["kayit_id"]] = set(etiket.get("anomali_turleri", []))
+
+    cift_karar, cift_sirasiz = cift_kararlari(girdi_map, kategori_map, tur_map)
+
+    # 2. gecis: yazim
     for etiket in etiketler:
         kayit = uretilen.get(etiket["kayit_id"])
         if kayit is None:
@@ -145,6 +215,8 @@ def etiketleri_uret(etiketler: list[dict], uretilen: dict[str, dict],
             sonuc.append({
                 "kayit_id": etiket["kayit_id"],
                 "fatura_no": etiket["fatura_no"],
+                "cift_grup_id": cift_grup_id(girdi_map[etiket["kayit_id"]])
+                if etiket["kayit_id"] in girdi_map else "",
                 "is_anomali": bool(etiket.get("is_anomali", bool(etiket.get("anomali_turleri")))),
                 "anomali_turleri": etiket.get("anomali_turleri", []),
                 "aciklama_kategorisi": etiket.get("aciklama_kategorisi", ""),
@@ -152,27 +224,23 @@ def etiketleri_uret(etiketler: list[dict], uretilen: dict[str, dict],
             })
             continue
 
-        # Kategori kaynagi: ÜRETİMDE fiilen kullanilan kategori (batch çiktisi).
-        # batch_hazirla --kategori-override kullanildiysa bu, etiket dosyasindaki
-        # popülasyon kategorisinden farkli olabilir; metin hangi kategoriye göre
-        # yazildiysa onay karari da ona dayanmali (ve etiket dosyasi metinle
-        # tutarli kalmali).
-        kategori = kayit.get("aciklama_kategorisi") or etiket.get("aciklama_kategorisi", "")
-        if kategori != etiket.get("aciklama_kategorisi"):
-            kategori_uyusmazligi += 1
-
+        kid = etiket["kayit_id"]
+        # Kategori kaynagi: ÜRETİMDE fiilen kullanilan kategori (batch çiktisi);
+        # --kategori-override kullanildiysa etiket dosyasindakinden farki olabilir.
+        kategori = kategori_map[kid]
         anomali_turleri = etiket.get("anomali_turleri", [])
         is_anomali = bool(etiket.get("is_anomali", bool(anomali_turleri)))
         if is_anomali != bool(anomali_turleri):
             is_anomali_uyusmazligi += 1
 
-        durum = onay_durumu_belirle(is_anomali, kategori)
+        durum = cift_karar.get(kid) or onay_durumu_belirle(is_anomali, kategori)
         dagilim[durum] += 1
         capraz[("anomalili" if is_anomali else "temiz", kategori, durum)] += 1
 
         sonuc.append({
-            "kayit_id": etiket["kayit_id"],
+            "kayit_id": kid,
             "fatura_no": etiket["fatura_no"],
+            "cift_grup_id": cift_grup_id(girdi_map[kid]) if kid in girdi_map else "",
             "is_anomali": is_anomali,
             "anomali_turleri": anomali_turleri,
             "aciklama_kategorisi": kategori,
@@ -188,6 +256,8 @@ def etiketleri_uret(etiketler: list[dict], uretilen: dict[str, dict],
         "eslesmeyen_aciklama_sayisi": len(uretilen) - kararli,
         "kategori_uyusmazligi": kategori_uyusmazligi,
         "is_anomali_uyusmazligi": is_anomali_uyusmazligi,
+        "cift_karari_verilen": len(cift_karar),
+        "cift_sirasiz": cift_sirasiz,
         "onay_durumu_dagilimi": dict(dagilim),
         "capraz_dagilim": {f"{a}|{k}|{d}": s for (a, k, d), s in sorted(capraz.items())},
     }
@@ -211,6 +281,10 @@ def raporu_yazdir(rapor: dict) -> None:
     if rapor["is_anomali_uyusmazligi"]:
         print(f"[!] UYARI: {rapor['is_anomali_uyusmazligi']} kayitta is_anomali ile "
               f"anomali_turleri çelisiyor; is_anomali esas alindi.")
+    print(f"[+] {rapor['cift_karari_verilen']} cift uyesine CIFT kurali uygulandi.")
+    if rapor["cift_sirasiz"]:
+        print(f"[!] UYARI: {rapor['cift_sirasiz']} ciftte yukleme_zamani yok, "
+              f"temel kurala dustu (sira uydurulmadi).")
 
     print("\n[+] onay_durumu dagilimi:")
     for durum in ONAY_DURUMLARI:
@@ -246,15 +320,27 @@ def main():
         print("HATA: hiç üretilmis açiklama yok. Önce aciklama_toplu_uret.py çalistir.")
         return
 
+    girdi_map: dict[str, dict] = {}
+    if Path(args.girdi_json).exists():
+        with open(args.girdi_json, "r", encoding="utf-8") as f:
+            girdi_map = {r["kayit_id"]: r for r in json.load(f)}
+
     with open(args.etiket_json, "r", encoding="utf-8") as f:
         etiketler = json.load(f)
     print(f"[+] {len(etiketler)} etiket okundu ({args.etiket_json}).")
+
+    # Ciftin iki uyesi de iliskisel turu tasimali (etiket ASIMETRIK kalmasin).
+    degisen = esleri_etiketle(list(girdi_map.values()),
+                              {x["kayit_id"]: x for x in etiketler})
+    if degisen:
+        print(f"[+] {degisen} ese iliskisel etiket basildi (cift simetrigi).")
 
     if etiketler and "onay_durumu" in etiketler[0]:
         print("[!] Girdi etiket dosyasinda eski bir onay_durumu alani var (eski kuraldan "
               "kalma); YOK SAYILIP yeniden hesaplaniyor.")
 
-    sonuc, rapor = etiketleri_uret(etiketler, uretilen, tum_kayitlar=args.tum_kayitlar)
+    sonuc, rapor = etiketleri_uret(etiketler, uretilen, girdi_map,
+                                   tum_kayitlar=args.tum_kayitlar)
     if not rapor["etiketlenen_kayit_sayisi"]:
         print("HATA: hiçbir üretilmis açiklama etiket dosyasiyla eslesmedi (kayit_id uyumsuz?).")
         return
