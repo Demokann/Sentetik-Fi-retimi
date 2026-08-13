@@ -59,14 +59,15 @@ CIKTI_CSV = Path("data/firma_adlari_osm.csv")
 # satırı üreten OSM etiketi bunu zaten kesin biliyor. Yeni etiket eklerken alt_tip
 # adını data/urun_satici_uyumu.csv'deki sözlükle AYNI yaz.
 IS_KOLU_OSM_ETIKETLERI: dict[str, list[tuple[str, str, str]]] = {
+    # Mutfak ayrimi MUTFAK_KISITLARI'nda; burada yalniz menu bolumu OLAN alt tipler.
     "restoran": [("amenity", "restaurant", "restoran"),
                  ("amenity", "fast_food", "fast_food"),
                  ("amenity", "cafe", "pastane"),
                  ("amenity", "ice_cream", "pastane"),
-                 ("shop", "bakery", "firin"),
                  ("shop", "pastry", "pastane"),
-                 ("amenity", "bar", "bar"),
-                 ("amenity", "pub", "bar")],
+                 ("shop", "bakery", "restoran"),
+                 ("amenity", "bar", "restoran"),
+                 ("amenity", "pub", "restoran")],
     "market": [("shop", "supermarket", "supermarket"),
                ("shop", "convenience", "bakkal"),
                ("shop", "butcher", "kasap"),
@@ -117,23 +118,8 @@ IS_KOLU_OSM_ETIKETLERI: dict[str, list[tuple[str, str, str]]] = {
                       ("shop", "perfumery", "parfumeri")],
 }
 
-# OSM `cuisine` etiketi -> alt_tip. amenity/shop'tan ONCE bakilir: bir restoranin
-# ne sattigini `amenity=restaurant` degil mutfagi belirler.
-# KURAL: urun tarafinda karsiligi olmayan alt_tip YARATMA. Buradaki degerler
-# field_generator.MUTFAK_KISITLARI'nin bolum kumeleriyle ayni; `cuisine=kebab`
-# gibi bolumu olmayanlar bilerek YOK, genel restorana duserler.
-IS_KOLU_CUISINE_ALT_TIPLERI: dict[str, dict[str, str]] = {
-    "restoran": {
-        "pizza": "pizza",
-        "burger": "burger",
-        "sushi": "uzakdogu", "japanese": "uzakdogu", "chinese": "uzakdogu",
-        "asian": "uzakdogu", "thai": "uzakdogu", "korean": "uzakdogu",
-        "noodle": "uzakdogu", "ramen": "uzakdogu",
-        "seafood": "balik", "fish": "balik",
-        "coffee_shop": "pastane", "cake": "pastane", "dessert": "pastane",
-        "ice_cream": "pastane", "pastry": "pastane",
-    },
-}
+# OSM `cuisine` denendi, GERI ALINDI (CLAUDE.md 2026-08-13). Bos birakiliyor.
+IS_KOLU_CUISINE_ALT_TIPLERI: dict[str, dict[str, str]] = {}
 
 VARSAYILAN_ALT_TIP = "genel"
 ALT_TIP_TABANI = 40   # bunun altinda kalan alt tip raporda isaretlenir (dar havuz -> leakage)
