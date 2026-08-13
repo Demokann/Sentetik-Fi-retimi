@@ -1469,9 +1469,6 @@ def rastgele_firma_adi(is_kolu: IsKolu, firma_turu: FirmaTuru, kalemler=None) ->
 
     return f"{ozel_isim} {sektor_kelime} {suffix}"   # isim_once (varsayilan)
 
-# Alici (bizim şirketimiz) sabit kimlik bilgileri — her faturada ayni olmali
-ALICI_VKN_SABIT = "6463595880"
-ALICI_UNVAN_SABIT = "SOA People"
 
 
 
@@ -2220,8 +2217,6 @@ def rastgele_fatura() -> Fatura:
         saat=rastgele_saat(),
         satici_vkn=satici_kimlik,
         satici_unvan=satici_adi,
-        alici_vkn=ALICI_VKN_SABIT,
-        alici_unvan=ALICI_UNVAN_SABIT,
         is_kolu=is_kolu,   # yeni
         kalemler=kalemler,
     )
@@ -2242,8 +2237,6 @@ if __name__ == "__main__":
     print(f"  SATICI      : {fatura.satici_unvan}")
     etiket = kimlik_etiketi(fatura.satici_vkn)
     print(f"  SATICI {etiket:<4} : {fatura.satici_vkn}")
-    print(f"  ALICI       : {fatura.alici_unvan}")
-    print(f"  ALICI VKN   : {fatura.alici_vkn}")
     print("=" * 60)
 
     for k in fatura.kalemler:

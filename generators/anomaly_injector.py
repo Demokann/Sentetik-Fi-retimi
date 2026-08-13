@@ -282,8 +282,6 @@ def genel_toplam_anomali_uret(fatura: Fatura) -> Fatura:
         saat=fatura.saat,
         satici_vkn=fatura.satici_vkn,
         satici_unvan=fatura.satici_unvan,
-        alici_vkn=fatura.alici_vkn,
-        alici_unvan=fatura.alici_unvan,
         is_kolu=fatura.is_kolu,   # yeni
         kalemler=fatura.kalemler,
         sahte_toplam_vergisiz_tutar=getattr(fatura, "sahte_toplam_vergisiz_tutar", None),
@@ -322,8 +320,6 @@ def footer_kismi_anomali_uret(fatura: Fatura) -> Fatura:
         saat=fatura.saat,
         satici_vkn=fatura.satici_vkn,
         satici_unvan=fatura.satici_unvan,
-        alici_vkn=fatura.alici_vkn,
-        alici_unvan=fatura.alici_unvan,
         kalemler=fatura.kalemler,
         is_kolu=fatura.is_kolu,   # yeni
         sahte_genel_toplam=mevcut_sahte_genel_toplam,

@@ -194,8 +194,8 @@ class Fatura(BaseModel):
     saat: str = ""
     satici_vkn: str  # 10 haneli
     satici_unvan: str
-    alici_vkn: str
-    alici_unvan: str
+    # Alici (bizim sirketimiz) alanlari KALDIRILDI: her faturada ayni sabit
+    # degerdi, gercek fiste de yer almiyor.
     kalemler: List[FaturaKalemi]
     is_kolu: IsKolu   # yeni — iş kolu/kategori uyumsuzluğu validasyonu için şart
     is_anomali: bool = False
