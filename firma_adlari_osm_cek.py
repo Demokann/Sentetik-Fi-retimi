@@ -51,21 +51,110 @@ OVERPASS_URL = OVERPASS_SUNUCULAR["ana"]
 ISTEK_BASLIKLARI = {"User-Agent": "masrafAI-veri-cikarma/1.0 (egitim amacli sentetik veri projesi)"}
 CIKTI_CSV = Path("data/firma_adlari_osm.csv")
 
-# is_kolu -> Overpass OSM node etiket sorgu satırları (birden fazla olabilir).
+# is_kolu -> [(osm anahtar, osm değer, alt_tip), ...]
 # schema.py:IS_KOLU_KATEGORILERI ile aynı 11 iş kolu.
-IS_KOLU_OSM_ETIKETLERI = {
-    "restoran": ['node["amenity"="restaurant"]', 'node["amenity"="fast_food"]'],
-    "market": ['node["shop"="supermarket"]', 'node["shop"="convenience"]'],
-    "otel": ['node["tourism"="hotel"]'],
-    "ofis_tedarik": ['node["shop"="stationery"]', 'node["shop"="furniture"]'],
-    "teknoloji": ['node["shop"="electronics"]', 'node["shop"="computer"]'],
-    "danismanlik_firmasi": ['node["office"="consulting"]', 'node["office"="it"]'],
-    "lojistik_firmasi": ['node["office"="logistics"]', 'node["shop"="storage_rental"]'],
-    "ulasim_saglayici": ['node["amenity"="fuel"]', 'node["amenity"="taxi"]', 'node["amenity"="car_rental"]'],
-    "organizasyon": ['node["office"="event_management"]', 'node["amenity"="events_venue"]'],
-    "giyim_magazasi": ['node["shop"="clothes"]'],
-    "kisisel_bakim": ['node["shop"="hairdresser"]', 'node["shop"="beauty"]', 'node["shop"="cosmetics"]'],
+#
+# alt_tip, satıcının hangi ürünleri satabileceğinin TEK kaynağıdır: eskiden firma
+# ADINDAN regex ile tahmin ediliyordu (field_generator.FIRMA_ADI_KISITLARI), oysa
+# satırı üreten OSM etiketi bunu zaten kesin biliyor. Yeni etiket eklerken alt_tip
+# adını data/urun_satici_uyumu.csv'deki sözlükle AYNI yaz.
+IS_KOLU_OSM_ETIKETLERI: dict[str, list[tuple[str, str, str]]] = {
+    "restoran": [("amenity", "restaurant", "restoran"),
+                 ("amenity", "fast_food", "fast_food"),
+                 ("amenity", "cafe", "pastane"),
+                 ("amenity", "ice_cream", "pastane"),
+                 ("shop", "bakery", "firin"),
+                 ("shop", "pastry", "pastane"),
+                 ("amenity", "bar", "bar"),
+                 ("amenity", "pub", "bar")],
+    "market": [("shop", "supermarket", "supermarket"),
+               ("shop", "convenience", "bakkal"),
+               ("shop", "butcher", "kasap"),
+               ("shop", "greengrocer", "manav"),
+               ("shop", "confectionery", "sekerci"),
+               ("shop", "kiosk", "bufe"),
+               ("shop", "alcohol", "tekel"),
+               ("shop", "tobacco", "tutuncu"),
+               ("shop", "seafood", "balikci")],
+    "otel": [("tourism", "hotel", "otel"),
+             ("tourism", "guest_house", "pansiyon"),
+             ("tourism", "hostel", "hostel")],
+    "ofis_tedarik": [("shop", "stationery", "kirtasiye"),
+                     ("shop", "furniture", "mobilya"),
+                     ("shop", "books", "kitabevi"),
+                     ("shop", "copyshop", "fotokopi")],
+    "teknoloji": [("shop", "electronics", "elektronik"),
+                  ("shop", "computer", "bilgisayar"),
+                  ("shop", "mobile_phone", "telefon"),
+                  ("shop", "hifi", "ses")],
+    "danismanlik_firmasi": [("office", "consulting", "danismanlik"),
+                            ("office", "it", "bilisim"),
+                            ("office", "accountant", "muhasebe"),
+                            ("office", "tax_advisor", "mali_musavir"),
+                            ("office", "lawyer", "hukuk"),
+                            ("office", "advertising_agency", "reklam")],
+    "lojistik_firmasi": [("office", "logistics", "lojistik"),
+                         ("office", "courier", "kargo"),
+                         ("amenity", "post_office", "postane")],
+    "ulasim_saglayici": [("amenity", "fuel", "akaryakit"),
+                         ("amenity", "taxi", "taksi"),
+                         ("amenity", "car_rental", "arac_kiralama"),
+                         ("shop", "travel_agency", "seyahat_acentesi"),
+                         ("shop", "car_repair", "oto_servis"),
+                         ("shop", "tyres", "lastikci"),
+                         ("amenity", "car_wash", "arac_yikama")],
+    "organizasyon": [("office", "event_management", "ajans"),
+                     ("amenity", "events_venue", "mekan"),
+                     ("amenity", "conference_centre", "kongre")],
+    "giyim_magazasi": [("shop", "clothes", "giyim"),
+                       ("shop", "shoes", "ayakkabi"),
+                       ("shop", "bag", "canta"),
+                       ("shop", "tailor", "terzi")],
+    "kisisel_bakim": [("shop", "hairdresser", "kuafor"),
+                      ("shop", "beauty", "guzellik"),
+                      ("shop", "cosmetics", "kozmetik"),
+                      ("shop", "chemist", "drogeri"),
+                      ("shop", "perfumery", "parfumeri")],
 }
+
+# OSM `cuisine` etiketi -> alt_tip. amenity/shop'tan ONCE bakilir: bir restoranin
+# ne sattigini `amenity=restaurant` degil mutfagi belirler.
+# KURAL: urun tarafinda karsiligi olmayan alt_tip YARATMA. Buradaki degerler
+# field_generator.MUTFAK_KISITLARI'nin bolum kumeleriyle ayni; `cuisine=kebab`
+# gibi bolumu olmayanlar bilerek YOK, genel restorana duserler.
+IS_KOLU_CUISINE_ALT_TIPLERI: dict[str, dict[str, str]] = {
+    "restoran": {
+        "pizza": "pizza",
+        "burger": "burger",
+        "sushi": "uzakdogu", "japanese": "uzakdogu", "chinese": "uzakdogu",
+        "asian": "uzakdogu", "thai": "uzakdogu", "korean": "uzakdogu",
+        "noodle": "uzakdogu", "ramen": "uzakdogu",
+        "seafood": "balik", "fish": "balik",
+        "coffee_shop": "pastane", "cake": "pastane", "dessert": "pastane",
+        "ice_cream": "pastane", "pastry": "pastane",
+    },
+}
+
+VARSAYILAN_ALT_TIP = "genel"
+ALT_TIP_TABANI = 40   # bunun altinda kalan alt tip raporda isaretlenir (dar havuz -> leakage)
+
+
+def sorgu_satirlari(etiketler: list[tuple[str, str, str]]) -> list[str]:
+    return [f'node["{anahtar}"="{deger}"]' for anahtar, deger, _ in etiketler]
+
+
+def alt_tip_coz(osm_etiketleri: dict, etiketler: list[tuple[str, str, str]],
+                cuisine_haritasi: dict[str, str] | None = None) -> str:
+    if cuisine_haritasi:
+        # `cuisine` cok degerli olabilir: "pizza;italian" -> ilk eslesen kazanir.
+        for deger in (osm_etiketleri.get("cuisine") or "").split(";"):
+            alt_tip = cuisine_haritasi.get(deger.strip().lower())
+            if alt_tip:
+                return alt_tip
+    for anahtar, deger, alt_tip in etiketler:
+        if osm_etiketleri.get(anahtar) == deger:
+            return alt_tip
+    return VARSAYILAN_ALT_TIP
 
 # Türkiye'nin OSM alan id'si (relation 174737 + 3600000000). ŞU AN KULLANILMIYOR:
 # sorguya area kısıtı eklemek doğru sonucu veriyor ama İstanbul gibi yoğun
@@ -201,10 +290,13 @@ def sehir_gridi() -> list[tuple]:
 
 class Cekici:
     def __init__(self, hedef: int, bekleme: int, kutu_kota: int,
-                 sunucu: str = OVERPASS_URL):
+                 sunucu: str = OVERPASS_URL, alt_tip_tavan: int = 0):
         self.hedef = hedef
         self.bekleme = bekleme
         self.sunucu = sunucu
+        # Alt tip başına azami isim; 0 = SINIRSIZ. Market gibi bol etiketli iş
+        # kollarında supermarket'in kasap/manav'ı ezmesini engeller.
+        self.alt_tip_tavan = alt_tip_tavan
         # Şehir başına azami isim; 0 = SINIRSIZ (varsayılan). Sınırsızken hedef
         # nereden dolarsa oradan dolar -- çoğu kategoride İstanbul+Ankara yeter.
         # Amaç coğrafi denge DEĞİL, iş koluna uygun Türkçe ad hacmini hızlı
@@ -258,14 +350,15 @@ class Cekici:
             bekleme *= 2
         return None   # ısrarlı throttle -> son çare olarak bölmeyi dene
 
-    def _tile_isle(self, etiketler: list[str], bbox: tuple, derinlik: int,
-                   toplanan: dict[str, int], tavan: int) -> None:
+    def _tile_isle(self, etiketler: list[tuple[str, str, str]], bbox: tuple, derinlik: int,
+                   toplanan: dict[str, tuple[int, str]], tavan: int,
+                   cuisine_haritasi: dict[str, str] | None = None) -> None:
         """Bir tile'ı işler; timeout olursa MAX_DERINLIK'e kadar 4'e böler.
         `tavan` = bu şehir kutusu bitene kadar çıkılabilecek azami toplam boyut."""
         if len(toplanan) >= tavan:
             return   # kutu kotası doldu / hedefe ulaşıldı
 
-        elemanlar = self._istek_dayanikli(etiketler, bbox)
+        elemanlar = self._istek_dayanikli(sorgu_satirlari(etiketler), bbox)
 
         if elemanlar is None:
             if derinlik >= MAX_DERINLIK:
@@ -274,19 +367,28 @@ class Cekici:
             for alt in bbox_dorte_bol(bbox):
                 if len(toplanan) >= tavan:
                     return
-                self._tile_isle(etiketler, alt, derinlik + 1, toplanan, tavan)
+                self._tile_isle(etiketler, alt, derinlik + 1, toplanan, tavan, cuisine_haritasi)
             return
 
         for eleman in elemanlar:
             if len(toplanan) >= tavan:
                 break
-            isim = eleman.get("tags", {}).get("name")
+            osm_etiketleri = eleman.get("tags", {})
+            isim = osm_etiketleri.get("name")
             if isim and isim not in toplanan and not latin_disi_mi(isim):
-                toplanan[isim] = int(eleman.get("id") or 0)   # id yoksa 0 (yalnızca CSV kolonu)
+                alt_tip = alt_tip_coz(osm_etiketleri, etiketler, cuisine_haritasi)
+                if self.alt_tip_tavan and self._alt_tip_dolu(toplanan, alt_tip):
+                    continue
+                toplanan[isim] = (int(eleman.get("id") or 0), alt_tip)   # id yoksa 0
 
-    def kategori_cek(self, is_kolu: str, etiketler: list[str], grid: list[tuple],
-                     adlar: list[str]) -> list[dict]:
-        toplanan: dict[str, int] = {}   # isim -> osm_id (benzersizlik)
+    def _alt_tip_dolu(self, toplanan: dict[str, tuple[int, str]], alt_tip: str) -> bool:
+        mevcut = sum(1 for _, t in toplanan.values() if t == alt_tip)
+        return mevcut >= self.alt_tip_tavan
+
+    def kategori_cek(self, is_kolu: str, etiketler: list[tuple[str, str, str]],
+                     grid: list[tuple], adlar: list[str]) -> list[dict]:
+        toplanan: dict[str, tuple[int, str]] = {}   # isim -> (osm_id, alt_tip)
+        cuisine_haritasi = IS_KOLU_CUISINE_ALT_TIPLERI.get(is_kolu)
         try:
             for tile, ad in zip(grid, adlar):
                 if len(toplanan) >= self.hedef:
@@ -295,7 +397,7 @@ class Cekici:
                 tavan = (min(self.hedef, len(toplanan) + self.kutu_kota)
                          if self.kutu_kota else self.hedef)
                 onceki = len(toplanan)
-                self._tile_isle(etiketler, tile, 0, toplanan, tavan)
+                self._tile_isle(etiketler, tile, 0, toplanan, tavan, cuisine_haritasi)
                 if len(toplanan) > onceki:
                     print(f"      {ad:16} +{len(toplanan) - onceki:4}  (toplam {len(toplanan)})")
         except KeyboardInterrupt:
@@ -304,8 +406,8 @@ class Cekici:
             self.kesildi = True
             print(f"\n    [Ctrl+C] {is_kolu} yarıda kesildi, "
                   f"{len(toplanan)} isim KAYDEDİLİYOR.")
-        return [{"is_kolu": is_kolu, "isim": isim, "osm_id": oid}
-                for isim, oid in toplanan.items()]
+        return [{"is_kolu": is_kolu, "isim": isim, "osm_id": oid, "alt_tip": alt_tip}
+                for isim, (oid, alt_tip) in toplanan.items()]
 
 
 def mevcut_kayitlari_yukle() -> dict[str, list[dict]]:
@@ -316,6 +418,7 @@ def mevcut_kayitlari_yukle() -> dict[str, list[dict]]:
         kayitlar = list(csv.DictReader(f))
     gruplar: dict[str, list[dict]] = {}
     for k in kayitlar:
+        k.setdefault("alt_tip", VARSAYILAN_ALT_TIP)   # alt_tip'siz eski CSV
         gruplar.setdefault(k["is_kolu"], []).append(k)
     return gruplar
 
@@ -324,12 +427,37 @@ def csv_yaz(gruplar: dict[str, list[dict]]) -> None:
     tum_kayitlar = [k for kayitlar in gruplar.values() for k in kayitlar]
     CIKTI_CSV.parent.mkdir(parents=True, exist_ok=True)
     with open(CIKTI_CSV, "w", newline="", encoding="utf-8") as f:
-        yazici = csv.DictWriter(f, fieldnames=["is_kolu", "isim", "osm_id"])
+        yazici = csv.DictWriter(f, fieldnames=["is_kolu", "isim", "osm_id", "alt_tip"])
         yazici.writeheader()
         yazici.writerows(tum_kayitlar)
 
 
+def alt_tip_raporu(gruplar: dict[str, list[dict]]) -> None:
+    print("\n[alt tip dağılımı]")
+    for is_kolu, etiketler in IS_KOLU_OSM_ETIKETLERI.items():
+        kayitlar = gruplar.get(is_kolu) or []
+        if not kayitlar:
+            continue
+        sayac: dict[str, int] = {}
+        for k in kayitlar:
+            t = k.get("alt_tip") or VARSAYILAN_ALT_TIP
+            sayac[t] = sayac.get(t, 0) + 1
+        bekleniyor = list(dict.fromkeys(
+            [t for _, _, t in etiketler]
+            + list((IS_KOLU_CUISINE_ALT_TIPLERI.get(is_kolu) or {}).values())))
+        dagilim = "  ".join(f"{t}={sayac.get(t, 0)}" for t in bekleniyor)
+        print(f"  {is_kolu:22s} {len(kayitlar):5d}  {dagilim}")
+        bos = [t for t in bekleniyor if not sayac.get(t)]
+        ince = [t for t in bekleniyor if 0 < sayac.get(t, 0) < ALT_TIP_TABANI]
+        if bos:
+            print(f"  {'':22s}        [!] hiç gelmedi: {', '.join(bos)}")
+        if ince:
+            print(f"  {'':22s}        [!] {ALT_TIP_TABANI} altinda (dar havuz, "
+                  f"üst tipe eritilmeli): {', '.join(ince)}")
+
+
 def main():
+    global CIKTI_CSV
     parser = argparse.ArgumentParser(description="OSM tüm-Türkiye firma adı çekici (adaptif bölme)")
     parser.add_argument("--hedef", type=int, default=VARSAYILAN_HEDEF, help="is_kolu başına hedef benzersiz isim")
     parser.add_argument("--bekleme", type=int, default=VARSAYILAN_BEKLEME, help="istekler arası saniye")
@@ -337,6 +465,12 @@ def main():
                         help="taranacak şehir sayısı (liste büyükten küçüğe sıralı)")
     parser.add_argument("--kutu-kota", type=int, default=0,
                         help="şehir başına azami isim (0 = sınırsız; coğrafi yayılım istersen 100-200 ver)")
+    parser.add_argument("--alt-tip-tavan", type=int, default=0,
+                        help="alt tip başına azami isim (0 = sınırsız; bol alt tip nadiri ezmesin diye)")
+    parser.add_argument("--cikti", type=Path, default=CIKTI_CSV,
+                        help="çıktı CSV yolu (deneme koşusunda ver, gerçek dosyanın üstüne yazma)")
+    parser.add_argument("--is-kolu", default="",
+                        help="yalnız bu iş kollarını çek (virgülle ayrık); boş = hepsi")
     parser.add_argument("--grid-satir", type=int, help=argparse.SUPPRESS)   # eski mod, kullanılmıyor
     parser.add_argument("--grid-sutun", type=int, help=argparse.SUPPRESS)   # eski mod, kullanılmıyor
     parser.add_argument("--sunucu", default="ana", choices=list(OVERPASS_SUNUCULAR),
@@ -344,6 +478,13 @@ def main():
     parser.add_argument("--yeniden", action="store_true",
                         help="mevcut CSV'yi yok say, hepsini baştan çek")
     args = parser.parse_args()
+
+    CIKTI_CSV = args.cikti
+    secili = {s.strip() for s in args.is_kolu.split(",") if s.strip()}
+    if secili:
+        bilinmeyen = secili - set(IS_KOLU_OSM_ETIKETLERI)
+        if bilinmeyen:
+            parser.error(f"bilinmeyen is_kolu: {', '.join(sorted(bilinmeyen))}")
 
     if args.grid_satir or args.grid_sutun:
         print("[!] --grid-satir/--grid-sutun artık kullanılmıyor (şehir kutusu moduna geçildi), "
@@ -361,10 +502,10 @@ def main():
 
     sunucu = OVERPASS_SUNUCULAR[args.sunucu]
     print(f"[+] Sunucu: {args.sunucu} ({sunucu})")
-    cekici = Cekici(args.hedef, args.bekleme, kutu_kota, sunucu)
+    cekici = Cekici(args.hedef, args.bekleme, kutu_kota, sunucu, args.alt_tip_tavan)
 
     for is_kolu, etiketler in IS_KOLU_OSM_ETIKETLERI.items():
-        if is_kolu in gruplar:
+        if is_kolu in gruplar or (secili and is_kolu not in secili):
             continue
         print(f"[+] {is_kolu} çekiliyor...")
         try:
@@ -386,6 +527,7 @@ def main():
             break
 
     print(f"\n[+] Toplam {sum(len(v) for v in gruplar.values())} kayıt -> {CIKTI_CSV}")
+    alt_tip_raporu(gruplar)
 
 
 if __name__ == "__main__":
