@@ -164,7 +164,7 @@ def limit_asimi_anomali_uret(fatura: Fatura) -> Fatura:
             harcama_kategorisi=limitli_kategori,
             miktar=rastgele_miktar(birim),
             birim=birim,
-            birim_fiyat=Decimal(str(limit * random.uniform(1.5, 3.0))),
+            birim_fiyat=Decimal(str(round(limit * random.uniform(1.5, 3.0), 2))),
             iskonto_orani=0.0,
             kdv_orani=KDV_ORANI_MAP[limitli_kategori],
         )
@@ -179,7 +179,7 @@ def limit_asimi_anomali_uret(fatura: Fatura) -> Fatura:
         return fatura
 
     kalem, limit = random.choice(limitli_kalemler)
-    kalem.birim_fiyat = Decimal(str(limit * random.uniform(1.5, 3.0)))
+    kalem.birim_fiyat = Decimal(str(round(limit * random.uniform(1.5, 3.0), 2)))
     return fatura
 
 

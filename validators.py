@@ -404,6 +404,35 @@ def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
 
 # 8. Üretim Sonrasi Invariant Kontrolü (regresyon güvenlik ağı)
 
+FATURA_PARA_ALANLARI = ("toplam_vergisiz_tutar", "toplam_kdv_tutari",
+                        "toplam_iskonto", "genel_toplam")
+KALEM_SAYISAL_ALANLARI = ("miktar", "birim_fiyat", "iskonto_orani", "kdv_orani",
+                          "ara_toplam", "kdv_tutari", "satir_toplam")
+
+
+def _ondalik_haneden_uzun(deger, hane: int = 2) -> bool:
+    try:
+        ussu = Decimal(str(deger)).as_tuple().exponent
+    except Exception:
+        return False
+    return isinstance(ussu, int) and -ussu > hane
+
+
+def uzun_ondalik_uyarilari(faturalar: list[Fatura], hane: int = 2) -> list[str]:
+    sayac: dict[str, int] = {}
+    for f in faturalar:
+        for alan in FATURA_PARA_ALANLARI:
+            if _ondalik_haneden_uzun(getattr(f, alan, 0), hane):
+                sayac[alan] = sayac.get(alan, 0) + 1
+        for kalem in f.kalemler:
+            for alan in KALEM_SAYISAL_ALANLARI:
+                if _ondalik_haneden_uzun(getattr(kalem, alan, 0), hane):
+                    sayac[f"kalem.{alan}"] = sayac.get(f"kalem.{alan}", 0) + 1
+    return [f"{alan}: {adet} değerde {hane} haneden uzun ondalik var "
+            f"(gerçek fişe basilmaz, tür imzasi olur)."
+            for alan, adet in sorted(sayac.items())]
+
+
 def veri_seti_dogrula(faturalar: list[Fatura], hedef_oran: float, tolerans: float = 0.05) -> list[str]:
     """
     Üretilen veri setinin temel beklentilerini kontrol eder, ihlalleri
@@ -455,6 +484,8 @@ def veri_seti_dogrula(faturalar: list[Fatura], hedef_oran: float, tolerans: floa
         if asimetrik:
             uyarilar.append(f"{tur}: {asimetrik} çiftte yalniz BİR üye etiketli "
                             f"(çift simetrik etiketlenmeli).")
+
+    uyarilar.extend(uzun_ondalik_uyarilari(faturalar))
 
     return uyarilar
 
