@@ -37,6 +37,9 @@ trendyol*
 temiz_urunler.csv.yedek
 anomali_urunler.csv.yedek
 temiz_urunler.csv.yedek_kurumsal
+commit.txt
+kaggle_v10.zip
+ornek_kayit.txt
 
 # belirli klasörleri dahil et
 !data/urun_verileri/
