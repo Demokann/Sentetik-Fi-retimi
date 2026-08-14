@@ -22,11 +22,28 @@ latin_disi_mi() süzgeci. Overpass'ın area(TR) filtresi DENENDİ ve BIRAKILDI -
 İstanbul kutusunda 93 sn'de timeout verirken filtresiz sorgu 57 sn'de dönüyor
 (Türkiye sınır poligonu karmaşık, node başına kesişim testi pahalı).
 
+ÜÇ MOD:
+  1. Tam tarama (varsayılan): şehir kutularını gezip YENİ firma adı toplar.
+  2. `--etiket-tazele`: yeni firma aramaz. Mevcut CSV'deki `osm_id`'lerin
+     etiketlerini `node(id:...)` ile çeker (18 bin id ~19 istek) ve ham etiket
+     + alt tip kolonlarıyla AYRI dosyaya yazar. Firma kümesi değişmediği için
+     firma_registry.csv'nin yeniden üretilmesi gerekmez.
+  3. `--yeniden-etiketle`: ağa hiç çıkmaz, alt_tip'i ham etiketten yeniden türetir.
+
+HAM ETİKET NEDEN SAKLANIYOR: `alt_tip` bir YORUM, `osm_anahtar/osm_deger` ise
+ham gerçek. Sözlük yanlış çıkarsa (2026-08-13'te `cuisine` böyle oldu) yorumu
+saniyeler içinde yeniden üretiriz; ham gerçeği yeniden üretmek Overpass koşusu
+demek.
+
 Kullanım:
     python firma_adlari_osm_cek.py                       # varsayılan hedef 3000/is_kolu
     python firma_adlari_osm_cek.py --hedef 3000 --bekleme 10
     # Daha hızlı/kaba tarama için yalnızca en büyük N şehir:
     python firma_adlari_osm_cek.py --sehir-limit 25
+    # Yalnız alt tip: registry'deki firmaların etiketlerini tazele
+    python firma_adlari_osm_cek.py --etiket-tazele --bekleme 5
+    # Sözlük değişti, veriyi yeniden yorumla (ağ yok)
+    python firma_adlari_osm_cek.py --yeniden-etiketle --kaynak data/firma_adlari_osm_alt_tip.csv
 """
 
 import argparse
@@ -124,23 +141,70 @@ IS_KOLU_CUISINE_ALT_TIPLERI: dict[str, dict[str, str]] = {}
 VARSAYILAN_ALT_TIP = "genel"
 ALT_TIP_TABANI = 40   # bunun altinda kalan alt tip raporda isaretlenir (dar havuz -> leakage)
 
+# --- Alt tip yasam kurallari ------------------------------------------------
+#
+# Bir alt tip ancak URUN tarafinda ayristirilabilir bir havuzu varsa ANLAM
+# tasir. Havuzu olmayan alt tip uretimde sessizce bos kalir ya da rastgele urun
+# cektirir (2026-08-13'te `firin`/`bar` boyle uretildi).
+#
+# ERITME  : alt tip baska bir alt tipin davranisini aynen aliyorsa ona indirgenir.
+# BEKLEME : havuzu ileride etiketlenecekse alt_tip kolonuna `genel` yazilir.
+#           HAM ETIKET (osm_anahtar/osm_deger) her halukarda saklandigi icin
+#           urun tarafi hazir olunca `--yeniden-etiketle` yeterli, yeniden
+#           cekim GEREKMEZ.
+ALT_TIP_ERITME: dict[str, str] = {
+    "tutuncu": "bufe",       # sigara yasakli kategori -> temiz uretimde havuzu yok
+    "tekel": "bufe",         # ayni gerekce (alkol yasakli); ikisi de icecek/atistirmalik satar
+    "kitabevi": "kirtasiye",  # hicbir kategoride kitap yok
+    "fotokopi": "kirtasiye",  # urun degil hizmet
+    "ses": "elektronik",     # 6 firma
+    "terzi": "giyim",        # havuzu yok
+}
+
+# Urun tarafi HAZIR olan alt tipler. Digerleri `genel` yazilir.
+#   restoran/fast_food/pastane -> restoran_urunleri.csv bolumleri
+#   kasap/manav                -> market CSV'de ET TAVUK / MEYVE SEBZE deterministik
+#   mobilya/kirtasiye/bilisim  -> kategori duzeyinde ayrisiyor, urun etiketi gerekmiyor
+AKTIF_ALT_TIPLER: set[str] = {
+    "restoran", "fast_food", "pastane",
+    "kasap", "manav",
+    "mobilya", "kirtasiye", "bilisim",
+}
+
+# (osm anahtar, osm deger) -> ham alt tip. Sorgu tablosundan turetilir.
+_ETIKET_ALT_TIP: dict[tuple[str, str], str] = {
+    (anahtar, deger): alt_tip
+    for etiketler in IS_KOLU_OSM_ETIKETLERI.values()
+    for anahtar, deger, alt_tip in etiketler
+}
+
 
 def sorgu_satirlari(etiketler: list[tuple[str, str, str]]) -> list[str]:
     return [f'node["{anahtar}"="{deger}"]' for anahtar, deger, _ in etiketler]
 
 
-def alt_tip_coz(osm_etiketleri: dict, etiketler: list[tuple[str, str, str]],
-                cuisine_haritasi: dict[str, str] | None = None) -> str:
-    if cuisine_haritasi:
-        # `cuisine` cok degerli olabilir: "pizza;italian" -> ilk eslesen kazanir.
-        for deger in (osm_etiketleri.get("cuisine") or "").split(";"):
-            alt_tip = cuisine_haritasi.get(deger.strip().lower())
-            if alt_tip:
-                return alt_tip
+def ham_etiket_coz(osm_etiketleri: dict,
+                   etiketler: list[tuple[str, str, str]]) -> tuple[str, str, str]:
+    """Elemanin HAM OSM etiketini bulur: (anahtar, deger, ham alt tip).
+    Sira onemli, ilk eslesen kazanir (bir node hem amenity=cafe hem shop=bakery
+    tasiyabilir). Eslesme yoksa ucu de bos/genel."""
     for anahtar, deger, alt_tip in etiketler:
         if osm_etiketleri.get(anahtar) == deger:
-            return alt_tip
-    return VARSAYILAN_ALT_TIP
+            return anahtar, deger, alt_tip
+    return "", "", VARSAYILAN_ALT_TIP
+
+
+def alt_tip_uygula(ham_alt_tip: str) -> str:
+    """Ham alt tipe eritme ve bekleme kurallarini uygular."""
+    alt_tip = ALT_TIP_ERITME.get(ham_alt_tip, ham_alt_tip)
+    return alt_tip if alt_tip in AKTIF_ALT_TIPLER else VARSAYILAN_ALT_TIP
+
+
+def satirdan_alt_tip(satir: dict) -> str:
+    """CSV satirindaki HAM etiketten alt tipi yeniden turetir (ag gerekmez)."""
+    anahtar = (satir.get("osm_anahtar") or "").strip()
+    deger = (satir.get("osm_deger") or "").strip()
+    return alt_tip_uygula(_ETIKET_ALT_TIP.get((anahtar, deger), VARSAYILAN_ALT_TIP))
 
 # Türkiye'nin OSM alan id'si (relation 174737 + 3600000000). ŞU AN KULLANILMIYOR:
 # sorguya area kısıtı eklemek doğru sonucu veriyor ama İstanbul gibi yoğun
@@ -291,9 +355,8 @@ class Cekici:
         self.istek_sayaci = 0
         self.kesildi = False   # Ctrl+C ile yarıda kesildi mi (kısmi kayıt işareti)
 
-    def _istek(self, etiketler: list[str], bbox: tuple) -> list[dict] | str:
-        """Tek bir bbox'ı sorgular. Timeout/504 -> BOL, 429 -> BEKLE; başka hata -> raise."""
-        sorgu = sorgu_olustur(etiketler, bbox, self.hedef)
+    def _istek(self, sorgu: str) -> list[dict] | str:
+        """Tek bir Overpass sorgusu. Timeout/504 -> BOL, 429 -> BEKLE; başka hata -> raise."""
         self.istek_sayaci += 1
         try:
             yanit = requests.post(self.sunucu, data={"data": sorgu},
@@ -319,13 +382,13 @@ class Cekici:
         finally:
             time.sleep(self.bekleme)
 
-    def _istek_dayanikli(self, etiketler: list[str], bbox: tuple) -> list[dict] | None:
-        """429'da AYNI tile'ı üstel geri çekilmeyle tekrar dener (bölmez -- bölmek
+    def _istek_dayanikli(self, sorgu: str) -> list[dict] | None:
+        """429'da AYNI sorguyu üstel geri çekilmeyle tekrar dener (bölmez -- bölmek
         tam da sunucunun istemediği şeyi, istek sayısını 4'e katlamayı yapar).
         None -> gerçek timeout, çağıran tile'ı bölmeli."""
         bekleme = RATE_LIMIT_BEKLEME
         for deneme in range(1, MAX_THROTTLE_DENEME + 1):
-            sonuc = self._istek(etiketler, bbox)
+            sonuc = self._istek(sorgu)
             if isinstance(sonuc, list):
                 return sonuc
             if sonuc == BOL:
@@ -337,14 +400,15 @@ class Cekici:
         return None   # ısrarlı throttle -> son çare olarak bölmeyi dene
 
     def _tile_isle(self, etiketler: list[tuple[str, str, str]], bbox: tuple, derinlik: int,
-                   toplanan: dict[str, tuple[int, str]], tavan: int,
+                   toplanan: dict[str, tuple], tavan: int,
                    cuisine_haritasi: dict[str, str] | None = None) -> None:
         """Bir tile'ı işler; timeout olursa MAX_DERINLIK'e kadar 4'e böler.
         `tavan` = bu şehir kutusu bitene kadar çıkılabilecek azami toplam boyut."""
         if len(toplanan) >= tavan:
             return   # kutu kotası doldu / hedefe ulaşıldı
 
-        elemanlar = self._istek_dayanikli(sorgu_satirlari(etiketler), bbox)
+        elemanlar = self._istek_dayanikli(
+            sorgu_olustur(sorgu_satirlari(etiketler), bbox, self.hedef))
 
         if elemanlar is None:
             if derinlik >= MAX_DERINLIK:
@@ -362,18 +426,21 @@ class Cekici:
             osm_etiketleri = eleman.get("tags", {})
             isim = osm_etiketleri.get("name")
             if isim and isim not in toplanan and not latin_disi_mi(isim):
-                alt_tip = alt_tip_coz(osm_etiketleri, etiketler, cuisine_haritasi)
-                if self.alt_tip_tavan and self._alt_tip_dolu(toplanan, alt_tip):
+                anahtar, deger, ham = ham_etiket_coz(osm_etiketleri, etiketler)
+                if self.alt_tip_tavan and self._alt_tip_dolu(toplanan, ham):
                     continue
-                toplanan[isim] = (int(eleman.get("id") or 0), alt_tip)   # id yoksa 0
+                # HAM etiket saklanir; alt_tip ondan turetilir (bkz. alt_tip_uygula).
+                toplanan[isim] = (int(eleman.get("id") or 0), anahtar, deger, ham)
 
-    def _alt_tip_dolu(self, toplanan: dict[str, tuple[int, str]], alt_tip: str) -> bool:
-        mevcut = sum(1 for _, t in toplanan.values() if t == alt_tip)
+    def _alt_tip_dolu(self, toplanan: dict[str, tuple], alt_tip: str) -> bool:
+        # Tavan HAM alt tipe uygulanir: eritilmis/bekleyen tipler `genel`'e
+        # dustugu icin nihai alt tipe bakmak butun kotayi tek kovaya yigardi.
+        mevcut = sum(1 for kayit in toplanan.values() if kayit[3] == alt_tip)
         return mevcut >= self.alt_tip_tavan
 
     def kategori_cek(self, is_kolu: str, etiketler: list[tuple[str, str, str]],
                      grid: list[tuple], adlar: list[str]) -> list[dict]:
-        toplanan: dict[str, tuple[int, str]] = {}   # isim -> (osm_id, alt_tip)
+        toplanan: dict[str, tuple] = {}   # isim -> (osm_id, anahtar, deger, ham alt tip)
         cuisine_haritasi = IS_KOLU_CUISINE_ALT_TIPLERI.get(is_kolu)
         try:
             for tile, ad in zip(grid, adlar):
@@ -392,54 +459,162 @@ class Cekici:
             self.kesildi = True
             print(f"\n    [Ctrl+C] {is_kolu} yarıda kesildi, "
                   f"{len(toplanan)} isim KAYDEDİLİYOR.")
-        return [{"is_kolu": is_kolu, "isim": isim, "osm_id": oid, "alt_tip": alt_tip}
-                for isim, (oid, alt_tip) in toplanan.items()]
+        return [{"is_kolu": is_kolu, "isim": isim, "osm_id": oid,
+                 "osm_anahtar": anahtar, "osm_deger": deger,
+                 "alt_tip": alt_tip_uygula(ham)}
+                for isim, (oid, anahtar, deger, ham) in toplanan.items()]
+
+    def etiketleri_cek(self, osm_idler: list[int], paket: int) -> dict[int, dict]:
+        """Verilen osm_id'lerin ETIKETLERINI ceker (yeni firma aramaz).
+        `node(id:...); out tags;` cok hafif bir sorgu: 18 bin id ~19 istekte biter.
+        Donen sozluk: osm_id -> OSM etiketleri. Silinmis node yanitta yer almaz."""
+        sonuc: dict[int, dict] = {}
+        toplam_paket = (len(osm_idler) + paket - 1) // paket
+        for sira in range(toplam_paket):
+            dilim = osm_idler[sira * paket:(sira + 1) * paket]
+            sorgu = (f"[out:json][timeout:{PER_TILE_TIMEOUT}];\n"
+                     f"node(id:{','.join(str(i) for i in dilim)});\nout tags;")
+            elemanlar = self._istek_dayanikli(sorgu)
+            if elemanlar is None:
+                print(f"      [!] paket {sira + 1}/{toplam_paket} alinamadi, atlandi "
+                      f"({len(dilim)} id `genel` kalacak)")
+                continue
+            for eleman in elemanlar:
+                sonuc[int(eleman.get("id") or 0)] = eleman.get("tags", {})
+            print(f"      paket {sira + 1}/{toplam_paket}  +{len(elemanlar):4}  "
+                  f"(toplam {len(sonuc)}/{len(osm_idler)})")
+        return sonuc
 
 
-def mevcut_kayitlari_yukle() -> dict[str, list[dict]]:
-    """Daha önce başarıyla çekilmiş kategorileri tekrar çekmemek için (resumable)."""
-    if not CIKTI_CSV.exists():
+CSV_KOLONLARI = ["is_kolu", "isim", "osm_id", "osm_anahtar", "osm_deger", "alt_tip"]
+
+
+def kayitlari_yukle(yol: Path) -> dict[str, list[dict]]:
+    """CSV'yi is_kolu -> [satir] olarak okur. Eksik kolonlar (alt_tip'siz ya da
+    ham etiketsiz eski dosyalar) bos varsayilanla doldurulur."""
+    if not yol.exists():
         return {}
-    with open(CIKTI_CSV, encoding="utf-8") as f:
+    with open(yol, encoding="utf-8") as f:
         kayitlar = list(csv.DictReader(f))
     gruplar: dict[str, list[dict]] = {}
     for k in kayitlar:
-        k.setdefault("alt_tip", VARSAYILAN_ALT_TIP)   # alt_tip'siz eski CSV
+        for kolon in ("osm_anahtar", "osm_deger"):
+            k.setdefault(kolon, "")
+        k.setdefault("alt_tip", VARSAYILAN_ALT_TIP)
         gruplar.setdefault(k["is_kolu"], []).append(k)
     return gruplar
 
 
-def csv_yaz(gruplar: dict[str, list[dict]]) -> None:
+def mevcut_kayitlari_yukle() -> dict[str, list[dict]]:
+    """Daha önce başarıyla çekilmiş kategorileri tekrar çekmemek için (resumable)."""
+    return kayitlari_yukle(CIKTI_CSV)
+
+
+def csv_yaz(gruplar: dict[str, list[dict]], yol: Path | None = None) -> None:
     tum_kayitlar = [k for kayitlar in gruplar.values() for k in kayitlar]
-    CIKTI_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with open(CIKTI_CSV, "w", newline="", encoding="utf-8") as f:
-        yazici = csv.DictWriter(f, fieldnames=["is_kolu", "isim", "osm_id", "alt_tip"])
+    hedef = yol or CIKTI_CSV
+    hedef.parent.mkdir(parents=True, exist_ok=True)
+    with open(hedef, "w", newline="", encoding="utf-8") as f:
+        yazici = csv.DictWriter(f, fieldnames=CSV_KOLONLARI, extrasaction="ignore")
         yazici.writeheader()
-        yazici.writerows(tum_kayitlar)
+        for kayit in tum_kayitlar:
+            yazici.writerow({kolon: kayit.get(kolon, "") for kolon in CSV_KOLONLARI})
 
 
 def alt_tip_raporu(gruplar: dict[str, list[dict]]) -> None:
-    print("\n[alt tip dağılımı]")
+    """HAM etiket dağılımını basar ve her alt tipin akıbetini (aktif / eritildi /
+    beklemede) gösterir. Nihai `alt_tip` kolonu yalnız AKTİF tipleri taşır."""
+    print("\n[alt tip dağılımı]  (ham OSM etiketi -> akıbet)")
     for is_kolu, etiketler in IS_KOLU_OSM_ETIKETLERI.items():
         kayitlar = gruplar.get(is_kolu) or []
         if not kayitlar:
             continue
         sayac: dict[str, int] = {}
         for k in kayitlar:
-            t = k.get("alt_tip") or VARSAYILAN_ALT_TIP
-            sayac[t] = sayac.get(t, 0) + 1
-        bekleniyor = list(dict.fromkeys(
-            [t for _, _, t in etiketler]
-            + list((IS_KOLU_CUISINE_ALT_TIPLERI.get(is_kolu) or {}).values())))
-        dagilim = "  ".join(f"{t}={sayac.get(t, 0)}" for t in bekleniyor)
-        print(f"  {is_kolu:22s} {len(kayitlar):5d}  {dagilim}")
-        bos = [t for t in bekleniyor if not sayac.get(t)]
-        ince = [t for t in bekleniyor if 0 < sayac.get(t, 0) < ALT_TIP_TABANI]
-        if bos:
-            print(f"  {'':22s}        [!] hiç gelmedi: {', '.join(bos)}")
-        if ince:
-            print(f"  {'':22s}        [!] {ALT_TIP_TABANI} altinda (dar havuz, "
-                  f"üst tipe eritilmeli): {', '.join(ince)}")
+            ham = _ETIKET_ALT_TIP.get(
+                ((k.get("osm_anahtar") or "").strip(), (k.get("osm_deger") or "").strip()),
+                VARSAYILAN_ALT_TIP)
+            sayac[ham] = sayac.get(ham, 0) + 1
+        bekleniyor = list(dict.fromkeys([t for _, _, t in etiketler]))
+        print(f"  {is_kolu:22s} {len(kayitlar):5d} kayıt")
+        for t in bekleniyor:
+            adet = sayac.get(t, 0)
+            nihai = alt_tip_uygula(t)
+            if nihai == t:
+                akibet = "aktif"
+            elif t in ALT_TIP_ERITME:
+                akibet = f"eritildi -> {ALT_TIP_ERITME[t]}" + (
+                    "" if ALT_TIP_ERITME[t] in AKTIF_ALT_TIPLER else " (beklemede)")
+            else:
+                akibet = "beklemede (ürün tarafı yok, `genel` yazıldı)"
+            uyari = "  [!] taban altı" if 0 < adet < ALT_TIP_TABANI else (
+                "  [!] hiç gelmedi" if adet == 0 else "")
+            print(f"      {t:18s} {adet:5d}  {akibet}{uyari}")
+    tum = [k for kayitlar in gruplar.values() for k in kayitlar]
+    aktif = sum(1 for k in tum if (k.get("alt_tip") or VARSAYILAN_ALT_TIP) != VARSAYILAN_ALT_TIP)
+    hamsiz = sum(1 for k in tum if not (k.get("osm_anahtar") or "").strip())
+    print(f"\n  toplam {len(tum)} kayıt | aktif alt tip {aktif} "
+          f"(%{100 * aktif / len(tum):.1f}) | ham etiketi olmayan {hamsiz}")
+
+
+ETIKET_TAZELE_CIKTI = Path("data/firma_adlari_osm_alt_tip.csv")
+VARSAYILAN_ID_PAKETI = 500   # tek sorguda sorulacak osm_id adedi
+
+
+def etiket_tazele(cekici: "Cekici", kaynak: Path, cikti: Path, paket: int) -> None:
+    """Var olan CSV'deki firmaların OSM etiketlerini çeker, ham etiket + alt tip
+    kolonlarıyla AYRI bir dosyaya yazar. Yeni firma aramaz, ad değiştirmez:
+    registry ile birebir aynı firma kümesi korunur."""
+    gruplar = kayitlari_yukle(kaynak)
+    if not gruplar:
+        raise SystemExit(f"Kaynak CSV okunamadı ya da boş: {kaynak}")
+
+    idli = [k for kayitlar in gruplar.values() for k in kayitlar
+            if (k.get("osm_id") or "0").strip() not in ("", "0")]
+    osm_idler = sorted({int(k["osm_id"]) for k in idli})
+    toplam = sum(len(v) for v in gruplar.values())
+    print(f"[+] {kaynak}: {toplam} kayıt, {len(osm_idler)} benzersiz osm_id "
+          f"({toplam - len(idli)} kaydın id'si yok, `genel` kalacak)")
+    print(f"[+] {paket}'lik paketlerle ~{(len(osm_idler) + paket - 1) // paket} istek")
+
+    etiketler = cekici.etiketleri_cek(osm_idler, paket)
+
+    bulunamayan = 0
+    for is_kolu, kayitlar in gruplar.items():
+        is_kolu_etiketleri = IS_KOLU_OSM_ETIKETLERI.get(is_kolu, [])
+        for kayit in kayitlar:
+            osm_etiketleri = etiketler.get(int(kayit.get("osm_id") or 0))
+            if not osm_etiketleri:
+                bulunamayan += 1
+                kayit["osm_anahtar"], kayit["osm_deger"] = "", ""
+                kayit["alt_tip"] = VARSAYILAN_ALT_TIP
+                continue
+            anahtar, deger, ham = ham_etiket_coz(osm_etiketleri, is_kolu_etiketleri)
+            kayit["osm_anahtar"], kayit["osm_deger"] = anahtar, deger
+            kayit["alt_tip"] = alt_tip_uygula(ham)
+
+    csv_yaz(gruplar, cikti)
+    print(f"\n[+] {cikti} yazıldı. OSM'de bulunamayan (silinmiş/değişmiş) {bulunamayan} kayıt.")
+    alt_tip_raporu(gruplar)
+    print(f"\n[i] {kaynak} ve data/firma_registry.csv DEĞİŞMEDİ. Doğrulama "
+          f"temizse birleştirme ayrı adım.")
+
+
+def yeniden_etiketle(kaynak: Path) -> None:
+    """Sözlük değiştiğinde alt_tip'i HAM etiketten yeniden türetir. Ağa çıkmaz."""
+    gruplar = kayitlari_yukle(kaynak)
+    if not gruplar:
+        raise SystemExit(f"CSV okunamadı ya da boş: {kaynak}")
+    degisen = 0
+    for kayitlar in gruplar.values():
+        for kayit in kayitlar:
+            yeni = satirdan_alt_tip(kayit)
+            if yeni != (kayit.get("alt_tip") or VARSAYILAN_ALT_TIP):
+                degisen += 1
+            kayit["alt_tip"] = yeni
+    csv_yaz(gruplar, kaynak)
+    print(f"[+] {kaynak}: {degisen} kaydın alt_tip'i güncellendi (ağ isteği yok).")
+    alt_tip_raporu(gruplar)
 
 
 def main():
@@ -463,9 +638,33 @@ def main():
                         help="Overpass sunucusu; ana tıkanınca 'kumi' veya 'coffee' aynasına geç")
     parser.add_argument("--yeniden", action="store_true",
                         help="mevcut CSV'yi yok say, hepsini baştan çek")
+    parser.add_argument("--etiket-tazele", action="store_true",
+                        help="yeni firma ARAMA: mevcut CSV'deki osm_id'lerin etiketlerini "
+                             "çekip ham etiket + alt_tip kolonlarını AYRI dosyaya yaz")
+    parser.add_argument("--kaynak", type=Path, default=CIKTI_CSV,
+                        help="--etiket-tazele / --yeniden-etiketle için girdi CSV")
+    parser.add_argument("--tazele-cikti", type=Path, default=ETIKET_TAZELE_CIKTI,
+                        help="--etiket-tazele çıktısı (kaynağın üstüne YAZMAZ)")
+    parser.add_argument("--id-paketi", type=int, default=VARSAYILAN_ID_PAKETI,
+                        help="tek Overpass sorgusunda sorulacak osm_id adedi")
+    parser.add_argument("--yeniden-etiketle", action="store_true",
+                        help="ağa çıkmadan alt_tip'i ham etiketten yeniden türet "
+                             "(sözlük değiştiğinde)")
     args = parser.parse_args()
 
+    if args.yeniden_etiketle:
+        yeniden_etiketle(args.kaynak)
+        return
+
     CIKTI_CSV = args.cikti
+
+    if args.etiket_tazele:
+        sunucu = OVERPASS_SUNUCULAR[args.sunucu]
+        print(f"[+] Sunucu: {args.sunucu} ({sunucu})  bekleme={args.bekleme}sn")
+        etiket_tazele(Cekici(args.hedef, args.bekleme, 0, sunucu),
+                      args.kaynak, args.tazele_cikti, args.id_paketi)
+        return
+
     secili = {s.strip() for s in args.is_kolu.split(",") if s.strip()}
     if secili:
         bilinmeyen = secili - set(IS_KOLU_OSM_ETIKETLERI)
