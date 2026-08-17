@@ -51,6 +51,7 @@
 <body>
     <div class="receipt receipt-container">
         <div class="center bold" style="font-size: 14px;">{{ satici_unvan }}</div>
+        {% if satici_sahis_adi %}<div class="center">{{ satici_sahis_adi }}</div>{% endif %}
         <div class="center">{{ satici_kimlik_etiketi }}: {{ satici_vkn }}</div>
         <div class="address-space"></div> <!-- Adres kısmı boş bırakıldı -->
 
