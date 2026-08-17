@@ -24,8 +24,11 @@ class HarcamaKategorisi(str, Enum):
     TUTUN_URUNLERI = "tutun_urunleri"   # yeni
     KUMAR = "kumar"                     # yeni
     DIGER = "diger"                     # ölü kod
-    GIYIM = "giyim"                     # yeni
-    KISISEL_BAKIM = "kisisel_bakim"      # yeni
+    # GIYIM KALDIRILDI (2026-08-14): kurumsal masraf fişinde karşılığı yok
+    # (30 gerçek fişte hiç görülmedi) ve tek kaynağı temiz_urunler.csv'nin
+    # okunması güç Trendyol adlarıydı. Personel üniforması gerekirse küratörlü
+    # kısa bir liste yazılır, B2C havuzu geri getirilmez.
+    KISISEL_BAKIM = "kisisel_bakim"      # şampuan, krem, makyaj -- MARKET satar
     TEMIZLIK = "temizlik"                # yeni
 
 # Genel geçer, şirketten bağimsiz yasakli kategoriler (kanunen kabul edilmeyen gider mantiği)
@@ -91,7 +94,6 @@ KDV_ORANI_MAP = {
     HarcamaKategorisi.KUMAR: 20.0,
     HarcamaKategorisi.EGLENCE: 20.0,
     HarcamaKategorisi.DIGER: 20.0,
-    HarcamaKategorisi.GIYIM: 10.0,   # yeni — tekstil/hazır giyim indirimli KDV
     HarcamaKategorisi.KISISEL_BAKIM: 20.0,   # yeni — varsayım, teyit gerekebilir
     HarcamaKategorisi.TEMIZLIK: 20.0,        # yeni — varsayım
 }
@@ -106,10 +108,13 @@ class IsKolu(str, Enum):
     LOJISTIK_FIRMASI = "lojistik_firmasi"       # eskiden ULASIM_FIRMASI ise adini netleştirdik
     ULASIM_SAGLAYICI = "ulasim_saglayici"        # taksi duraği, akaryakit istasyonu, rent-a-car
     ORGANIZASYON = "organizasyon"
-    GIYIM_MAGAZASI = "giyim_magazasi"   # yeni
-
-    # Gerçekçi Sentetik Veri İçin Eklenmesi Gerekenler
-    KISISEL_BAKIM = "kisisel_bakim"      # Şampuan, krem, makyaj
+    # GIYIM_MAGAZASI ve KISISEL_BAKIM iş kolları KALDIRILDI (2026-08-14).
+    # Ölçüldü: ikisi faturaların %23,1'ini üretiyordu, buna karşılık kişisel
+    # bakım firmalarının %76'sı kuaför/berber/güzellik salonu, yani HİZMET
+    # satıcısıydı ve havuzda tek hizmet kalemi yoktu; giyimde 195 çelişen
+    # satıcı (iç giyim, çocuk) + 11 lüks marka vardı. Kurumsal masraf fişinde
+    # ikisinin de karşılığı yok (gerçek fiş etiketlemesi: yemek, yol, otopark).
+    # Kişisel bakım ÜRÜNLERİ markette satılmaya devam ediyor.
 
 
 IS_KOLU_KATEGORILERI = {
@@ -124,13 +129,14 @@ IS_KOLU_KATEGORILERI = {
         HarcamaKategorisi.YAZILIM_LISANS,
         HarcamaKategorisi.TEKNOLOJI_EKIPMAN,
     ],
-    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA, HarcamaKategorisi.TEMIZLIK],   # temizlik urunleri de markette satilir
+    # Kişisel bakım (şampuan, krem, makyaj) 2026-08-14'te buraya taşındı:
+    # market rafında gerçekten var, ayrı bir satıcı iş koluna gerek yok.
+    IsKolu.MARKET: [HarcamaKategorisi.TEMEL_GIDA, HarcamaKategorisi.TEMIZLIK,
+                    HarcamaKategorisi.KISISEL_BAKIM],
     IsKolu.DANISMANLIK_FIRMASI: [HarcamaKategorisi.DANISMANLIK],
     IsKolu.LOJISTIK_FIRMASI: [HarcamaKategorisi.ULASIM_HIZMETI],
     IsKolu.ULASIM_SAGLAYICI: [HarcamaKategorisi.ULASIM_BIREYSEL],
     IsKolu.ORGANIZASYON: [HarcamaKategorisi.YEMEK_HIZMETI],
-    IsKolu.GIYIM_MAGAZASI: [HarcamaKategorisi.GIYIM],   # yeni
-    IsKolu.KISISEL_BAKIM: [HarcamaKategorisi.KISISEL_BAKIM],
 }
 
 
@@ -194,6 +200,12 @@ class Fatura(BaseModel):
     saat: str = ""
     satici_vkn: str  # 10 haneli
     satici_unvan: str
+    # Sahis sirketinde ISLETME ADI ile SAHSIN ADI fiste AYRI IKI SATIRDIR
+    # (gercek fis: "SAYLA MANTI" / "FEYYAZ ESEN", "FIORE ART PIZZA" / "OSMAN TETIK").
+    # Tuzel kisilerde BOS. Fiste basili oldugu icin model girdisidir (OCR okur),
+    # ama anomali sinyali tasimaz ve `satici_vkn`in hane sayisiyla %100 korele
+    # oldugu icin kimlik ozelligi olarak KULLANILMAMALI.
+    satici_sahis_adi: str = ""
     # Alici (bizim sirketimiz) alanlari KALDIRILDI: her faturada ayni sabit
     # degerdi, gercek fiste de yer almiyor.
     kalemler: List[FaturaKalemi]
