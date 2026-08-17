@@ -2042,7 +2042,7 @@ def rastgele_kalem(
         miktar=rastgele_miktar(birim, kategori, aciklama),
         birim=birim,
         birim_fiyat=rastgele_birim_fiyat(kategori, birim, aciklama),
-        iskonto_orani=random.choices([0.0, 5.0, 10.0], weights=[70, 20, 10])[0],
+        iskonto_orani=0.0,   # gerçek fişlerde hiç görülmedi (2026-08-17)
         kdv_orani=kdv_orani_belirle(kategori),
     )
 
