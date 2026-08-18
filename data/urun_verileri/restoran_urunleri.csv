@@ -206,21 +206,21 @@ uzakdogu,Pad Thai,uzakdogu
 uzakdogu,Teriyaki Tavuk,uzakdogu
 uzakdogu,Yakisoba,uzakdogu
 uzakdogu,Karidesli Noodle,uzakdogu
-corbalar,Düğün Çorbası,
-corbalar,Bamya Çorbası,
-corbalar,Mantar Çorbası,
-corbalar,Sebze Çorbası,
-corbalar,Balık Çorbası,
-corbalar,Tavuk Çorbası,
-corbalar,Krema Mantar Çorbası,
-corbalar,Arabaşı Çorbası,
-corbalar,Yoğurt Çorbası,
-corbalar,Toyga Çorbası,
-corbalar,Şehriye Çorbası,
-corbalar,Köz Domates Çorbası,
-corbalar,Ispanak Çorbası,
-corbalar,Kabak Çorbası,
-corbalar,Nohut Çorbası,
+corbalar,Düğün Çorbası,corbaci
+corbalar,Bamya Çorbası,corbaci
+corbalar,Mantar Çorbası,corbaci
+corbalar,Sebze Çorbası,corbaci
+corbalar,Balık Çorbası,corbaci
+corbalar,Tavuk Çorbası,corbaci
+corbalar,Krema Mantar Çorbası,corbaci
+corbalar,Arabaşı Çorbası,corbaci
+corbalar,Yoğurt Çorbası,corbaci
+corbalar,Toyga Çorbası,corbaci
+corbalar,Şehriye Çorbası,corbaci
+corbalar,Köz Domates Çorbası,corbaci
+corbalar,Ispanak Çorbası,corbaci
+corbalar,Kabak Çorbası,corbaci
+corbalar,Nohut Çorbası,corbaci
 ara_sicaklar_mezeler,Kaşarlı Mantar,
 ara_sicaklar_mezeler,Mantar Sote,
 ara_sicaklar_mezeler,Fırın Patates,
@@ -325,3 +325,8 @@ tavukcu,Bütün Tavuk Izgara,tavukcu
 tavukcu,Piliç Izgara,tavukcu
 tavukcu,Köy Tavuğu Izgara,tavukcu
 tavukcu,Kanat Tabağı (Karışık),tavukcu
+corbalar,İşkembe Çorbası,corbaci
+corbalar,Kelle Paça Çorbası,corbaci
+corbalar,Beyran Çorbası,corbaci
+tost_sandvic,Patso,tostcu
+tost_sandvic,Patsosis,tostcu

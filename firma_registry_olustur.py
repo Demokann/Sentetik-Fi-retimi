@@ -31,7 +31,8 @@ from pathlib import Path
 
 from schema import IsKolu, FirmaTuru
 from generators.field_generator import (
-    rastgele_firma_adi, rastgele_vkn, rastgele_tckn, FIRMA_TURU_AGIRLIK,
+    rastgele_firma_adi, rastgele_sahis_kisi_adi, rastgele_vkn, rastgele_tckn,
+    FIRMA_TURU_AGIRLIK,
 )
 
 OSM_CSV = Path("data/firma_adlari_osm.csv")
@@ -140,6 +141,7 @@ def registry_uret(taban_per_iskolu: int, osm_pay: float = 0.8) -> list[dict]:
                 "firma_turu": tur.value,
                 "satici_unvan": ad,
                 "satici_kimlik": benzersiz_kimlik(rastgele_vkn, kullanilmis_kimlik),
+                "sahis_adi": "",
                 "kaynak": kaynak,
             })
             firma_id += 1
@@ -159,6 +161,8 @@ def registry_uret(taban_per_iskolu: int, osm_pay: float = 0.8) -> list[dict]:
                 "firma_turu": FirmaTuru.SAHIS_SIRKETI.value,
                 "satici_unvan": ad,
                 "satici_kimlik": benzersiz_kimlik(rastgele_tckn, kullanilmis_kimlik),
+                # Isletme adi ile SAHIBININ adi ayri satirlardir (gercek fis kaniti).
+                "sahis_adi": rastgele_sahis_kisi_adi(),
                 "kaynak": "sahis",
             })
             firma_id += 1
@@ -177,7 +181,8 @@ def registry_yaz(kayitlar: list[dict]) -> None:
     REGISTRY_CSV.parent.mkdir(parents=True, exist_ok=True)
     with open(REGISTRY_CSV, "w", newline="", encoding="utf-8") as f:
         yazici = csv.DictWriter(
-            f, fieldnames=["firma_id", "is_kolu", "firma_turu", "satici_unvan", "satici_kimlik", "kaynak"]
+            f, fieldnames=["firma_id", "is_kolu", "firma_turu", "satici_unvan",
+                           "satici_kimlik", "sahis_adi", "kaynak"]
         )
         yazici.writeheader()
         yazici.writerows(kayitlar)
