@@ -372,8 +372,6 @@ def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
     izinli_kategoriler = IS_KOLU_KATEGORILERI.get(fatura.is_kolu, [])
 
     for kalem in fatura.kalemler:
-        if not kalem_ara_toplam_dogrula(kalem):
-            turler.add("ara_toplam")
         if not kalem_kdv_tutari_dogrula(kalem):
             turler.add("kdv_tutari")
         if not kalem_satir_toplam_dogrula(kalem):
@@ -386,8 +384,8 @@ def kural_ihlali_turlerini_tespit_et(fatura: Fatura) -> set[str]:
             turler.add("ondalik_kaymasi")
         if kalem_ondalik_kaymasi_asagi_mi(kalem):
             turler.add("dusuk_ondalik_kaymasi")
-        # if kalem_limit_asimi_mi(kalem): şimdilik pasif kalsın şirket bazlı limit entegrasyonu yapılabilir.
-        #     turler.add("limit_asimi")
+        if kalem_limit_asimi_mi(kalem):
+            turler.add("limit_asimi")
 
     if not fatura_genel_toplam_dogrula(fatura):
         turler.add("genel_toplam")

@@ -233,38 +233,6 @@ def satir_toplami_anomali_uret(fatura: Fatura) -> Fatura:
     return fatura
 
 
-def ara_toplam_anomali_uret(fatura: Fatura) -> Fatura:
-    """
-    Rastgele bir kalemin ara_toplam'ini kasitli olarak saptirir. KDV ve
-    satir_toplam bu sahte ara_toplam üzerinden tutarli hesaplanmaya devam
-    eder (satir_toplam anomalisiyle çakişmadiği sürece).
-    """
-    hedef_index = random.randrange(len(fatura.kalemler))
-    orijinal_kalem = fatura.kalemler[hedef_index]
-
-    gercek_ara_toplam = orijinal_kalem.ara_toplam
-    carpan = random.choice([
-        random.uniform(1.15, 1.8),
-        random.uniform(0.4, 0.8),
-    ])
-    sahte_ara_toplam = Decimal(str(round(float(gercek_ara_toplam) * carpan, 2)))
-
-    anomalili_kalem = AnomaliliFaturaKalemi(
-        kalem_no=orijinal_kalem.kalem_no,
-        aciklama=orijinal_kalem.aciklama,
-        harcama_kategorisi=orijinal_kalem.harcama_kategorisi,
-        miktar=orijinal_kalem.miktar,
-        birim=orijinal_kalem.birim,
-        birim_fiyat=orijinal_kalem.birim_fiyat,
-        iskonto_orani=orijinal_kalem.iskonto_orani,
-        kdv_orani=orijinal_kalem.kdv_orani,
-        sahte_ara_toplam=sahte_ara_toplam,
-        sahte_satir_toplam=getattr(orijinal_kalem, "sahte_satir_toplam", None),
-    )
-    fatura.kalemler[hedef_index] = anomalili_kalem
-    return fatura
-
-
 def genel_toplam_anomali_uret(fatura: Fatura) -> Fatura:
     """
     Faturanin genel_toplam'ini kasitli olarak saptirir. kalemler listesi
@@ -292,26 +260,19 @@ def genel_toplam_anomali_uret(fatura: Fatura) -> Fatura:
 
 def footer_kismi_anomali_uret(fatura: Fatura) -> Fatura:
     """
-    toplam_vergisiz_tutar veya toplam_kdv_tutari'nden SADECE birini
-    kasitli olarak saptirir; genel_toplam kalemlerin gerçek toplamindan
-    hesaplanmaya devam eder (zaten sahte_genel_toplam ayarlanmadiysa).
+    toplam_kdv_tutari'ni kasitli olarak saptirir; genel_toplam kalemlerin
+    gerçek toplamindan hesaplanmaya devam eder. Eskiden toplam_vergisiz_tutar'i
+    da hedefleyebiliyordu ama o alan artik disa aktarilmiyor (2026-08-17) --
+    o dal secilirse anomali görünmez kaliyordu.
     """
-    hangi_alan = random.choice(["vergisiz", "kdv"])
     carpan = random.choice([random.uniform(1.1, 1.4), random.uniform(0.6, 0.9)])
 
     mevcut_sahte_genel_toplam = getattr(fatura, "sahte_genel_toplam", None)
     mevcut_sahte_vergisiz = getattr(fatura, "sahte_toplam_vergisiz_tutar", None)
-    mevcut_sahte_kdv = getattr(fatura, "sahte_toplam_kdv_tutari", None)
 
+    gercek = fatura.toplam_kdv_tutari
+    sahte_kdv = Decimal(str(round(float(gercek) * carpan, 2)))
     sahte_vergisiz = mevcut_sahte_vergisiz
-    sahte_kdv = mevcut_sahte_kdv
-
-    if hangi_alan == "vergisiz":
-        gercek = fatura.toplam_vergisiz_tutar
-        sahte_vergisiz = Decimal(str(round(float(gercek) * carpan, 2)))
-    else:
-        gercek = fatura.toplam_kdv_tutari
-        sahte_kdv = Decimal(str(round(float(gercek) * carpan, 2)))
 
     return AnomaliliFatura(
         fatura_no=fatura.fatura_no,
@@ -438,7 +399,6 @@ ANOMALI_FONKSIYONLARI = {
     "is_kolu_kategori_uyumsuzlugu": is_kolu_kategori_uyumsuzlugu_anomali_uret,
     "yasakli_kategori": yasakli_kategori_anomali_uret,
     "limit_asimi": limit_asimi_anomali_uret,
-    "ara_toplam": ara_toplam_anomali_uret,
     "kdv_tutari": kdv_tutari_anomali_uret,
     "satir_toplami": satir_toplami_anomali_uret,
 
@@ -660,7 +620,6 @@ if __name__ == "__main__":
         return "-"
 
     testler = [
-        ("ara_toplam", ara_toplam_anomali_uret),
         ("kdv_tutari", kdv_tutari_anomali_uret),
         ("satir_toplami", satir_toplami_anomali_uret),
         # Ondalık kaymaları matematiği BOZMAZ (tüm hesap ✓ kalır); tespitleri

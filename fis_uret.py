@@ -3,27 +3,15 @@
 Veri boru hattinin parçasi DEĞİLDİR; fişin kendisini üreten ayri araçtir
 (bkz. docs/arsiv/faz_a_fatura_uretimi.md).
 
-GÖSTERİM ARİTMETİĞİ (2026-07-31) -- fişin kendi içinde tutarli olmasi ŞART:
+GÖSTERİM ARİTMETİĞİ (2026-08-17, iskonto kaldırıldıktan sonra):
 
     brut_birim = birim_fiyat x (1 + kdv_orani/100)      KDV DAHİL birim fiyat
-    brut_tutar = birim_fiyat x miktar x (1 + kdv/100)   iskonto ÖNCESİ satir
-    indirim    = brut_tutar x iskonto_orani/100
-    brut_tutar - indirim = satir_toplam                 (ve toplami genel_toplam)
-
-Neden böyle: eski şablon fiyat sütununa `satir_toplam`'i (iskonto ZATEN
-düşülmüş) basip altina bir de İNDİRİM satiri ekliyordu -- ayni iskonto iki
-kez görünüyor, fiş toplami tutmuyordu. Üstelik indirim tutari `ara_toplam`
-(iskonto SONRASI, KDV hariç) üzerinden hesaplandigi için sayi da yanlişti;
-ölçüldü: 1.685 iskontolu kalemde ortalama 510,86 TL eksik yaziliyordu.
-120k faturanin %56,8'i iskontolu kalem içeriyor, yani TEMİZ fişlerin
-yarisindan fazlasi görselde aritmetik olarak bozuktu.
+    brut_tutar = birim_fiyat x miktar x (1 + kdv/100)   = satir_toplam
 
 Yuvarlama: brüt tutar TEK SEFERDE yuvarlanir (birim fiyati yuvarlayip
-miktarla çarpmak 5 kuruşa kadar sapma üretiyordu). Ölçüldü (4.000 fatura /
-8.358 temiz kalem): sapma %87,2'de tam sifir, %100'ünde <= 1 kuruş.
-Anomalili kalemlerde sapma BÜYÜK kalir -- `ara_toplam` anomalisi (fişte
-kalem ara_toplam'i hiç basilmadigi için eskiden GÖRÜNMEZDİ) böylece
-görselde tespit edilebilir hale gelir.
+miktarla çarpmak 5 kuruşa kadar sapma üretiyordu). Anomalili kalemlerde
+sapma BÜYÜK kalir ve görselde tespit edilebilir -- `kalem_gosterimi`
+kaydin kendi `satir_toplam`'ini okur, yeniden hesaplamaz.
 """
 
 import argparse
@@ -81,14 +69,11 @@ def kalem_gosterimi(kalem: dict) -> dict:
     kdv_carpani = 1 + kalem["kdv_orani"] / 100
     brut_birim = round(kalem["birim_fiyat"] * kdv_carpani, 2)
     brut_tutar = round(kalem["birim_fiyat"] * kalem["miktar"] * kdv_carpani, 2)
-    indirim = round(brut_tutar * kalem["iskonto_orani"] / 100, 2)
     return {
         **kalem,
         "miktar": miktar_formatla(kalem["birim"], kalem["miktar"]),
         "brut_birim": brut_birim,
         "brut_tutar": brut_tutar,
-        # 0 ise şablon İNDİRİM satirini hiç basmaz.
-        "indirim": indirim if kalem["iskonto_orani"] > 0 else 0,
     }
 
 
@@ -186,12 +171,14 @@ def saat_tohumlari_kur(faturalar: list[dict]) -> dict[str, str]:
 def kdv_gruplari_kur(kalemler: list[dict]) -> list[dict]:
     """KDV oranina göre kirilim (e-arşiv fişindeki KDV tablosu için).
 
-    Kalem düzeyindeki `kdv_tutari`ndan toplanir -- `kdv_tutari` anomalisi
-    böylece bu tabloda da iz birakir."""
+    kdv_tutari JSON'da yok (2026-08-17) -- satir_toplam - (birim_fiyat x miktar)
+    olarak türetilir. iskonto hep 0 oldugu için ara_toplam = birim_fiyat x miktar;
+    `kdv_tutari` anomalisi satir_toplam'in içine gömülü kaldigi için bu türetme
+    sahte degeri de dogru yansitir."""
     gruplar: dict[float, dict] = {}
     for k in kalemler:
         g = gruplar.setdefault(k["kdv_orani"], {"oran": k["kdv_orani"], "kdv": 0.0, "toplam": 0.0})
-        g["kdv"] += k["kdv_tutari"]
+        g["kdv"] += k["satir_toplam"] - (k["birim_fiyat"] * k["miktar"])
         g["toplam"] += k["satir_toplam"]
     for g in gruplar.values():
         g["kdv"] = round(g["kdv"], 2)
@@ -228,14 +215,19 @@ BOLMELER = ("egitim", "dogrulama", "test")
 
 
 def fisleri_uret(faturalar, output_dir: Path, sablonlar, saat_tohumlari, sayfa,
-                 yeniden: bool) -> tuple[int, int, int]:
-    """Bir fatura listesini render eder. Doner: (uretilen, atlanan, hatali)."""
+                 yeniden: bool, dosya_adi_esleme: dict[str, str] | None = None) -> tuple[int, int, int]:
+    """Bir fatura listesini render eder. Doner: (uretilen, atlanan, hatali).
+
+    dosya_adi_esleme verilirse cikti dosyasi kayit_id yerine eslenen adi
+    kullanir (ör. final_veriler_en icin opak hash) -- ayri bir kopyala/
+    yeniden-adlandir adimini gereksiz kilar."""
     output_dir.mkdir(parents=True, exist_ok=True)
     uretilen = atlanan = hatali = 0
     for i, fatura in enumerate(faturalar, start=1):
-        # Dosya adi KAYIT_ID: `fatura_no` tasarim geregi MUKERRER olabilir
-        # (CLAUDE.md §7) ve sira numarasi girdi dosyasina gore kayar.
-        cikti_yolu = output_dir / f"{fatura['kayit_id']}.png"
+        # Dosya adi varsayilan KAYIT_ID: `fatura_no` tasarim geregi MUKERRER
+        # olabilir (CLAUDE.md §7) ve sira numarasi girdi dosyasina gore kayar.
+        ad = (dosya_adi_esleme or {}).get(fatura["kayit_id"], fatura["kayit_id"])
+        cikti_yolu = output_dir / f"{ad}.png"
         if cikti_yolu.exists() and not yeniden:
             atlanan += 1
             continue
@@ -272,6 +264,12 @@ def main():
                              "(varsayılan: --input-json). Alt küme render ederken "
                              "tam dosyayı ver, yoksa mükerrer çiftin eşi görünmez ve "
                              "fiş tam koşudakinden FARKLI saat alır.")
+    parser.add_argument("--gorsel-cikti-dizini", default=None,
+                        help="--bolme-dizini ile birlikte: <b>_gorsel/ klasörlerini "
+                             "kaynak yerine bu dizinin altına yazar (ör. final_veriler_en).")
+    parser.add_argument("--kayit-id-esleme", default=None,
+                        help="{kayit_id: yeni_ad} JSON dosyası -- verilirse PNG adı "
+                             "kayit_id yerine bu eşlemeyi kullanır (ör. opak hash).")
     args = parser.parse_args()
 
     if not args.bolme_dizini and not args.input_json:
@@ -284,7 +282,8 @@ def main():
     # isler: (etiket, faturalar, cikti_dizini)
     if args.bolme_dizini:
         kaynak = Path(args.bolme_dizini)
-        isler = [(b, yukle(kaynak / f"{b}_girdi.json"), kaynak / f"{b}_gorsel")
+        gorsel_kok = Path(args.gorsel_cikti_dizini) if args.gorsel_cikti_dizini else kaynak
+        isler = [(b, yukle(kaynak / f"{b}_girdi.json"), gorsel_kok / f"{b}_gorsel")
                  for b in BOLMELER]
         tohum_havuzu = [f for _, fs, _ in isler for f in fs]
     else:
@@ -313,6 +312,8 @@ def main():
     env.filters["tutar"] = tutar_formatla
     sablonlar = [env.get_template(y.name) for y in yollar]
 
+    dosya_adi_esleme = yukle(args.kayit_id_esleme) if args.kayit_id_esleme else None
+
     toplam = sum(len(fs) for _, fs, _ in isler)
     print(f"{toplam} fatura için fiş üretiliyor "
           f"({len(sablonlar)} şablon: {', '.join(y.name for y in yollar)})...")
@@ -325,7 +326,7 @@ def main():
             if ad:
                 print(f"\n--- {ad.upper()}: {len(faturalar)} fatura -> {dizin}/")
             u, a, h = fisleri_uret(faturalar, dizin, sablonlar, saat_tohumlari,
-                                   sayfa, args.yeniden)
+                                   sayfa, args.yeniden, dosya_adi_esleme)
             uretilen, atlanan, hatali = uretilen + u, atlanan + a, hatali + h
         tarayici.close()
 

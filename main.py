@@ -21,25 +21,20 @@ def fatura_to_dict(fatura) -> dict:
         "saat": fatura.saat,                       # fişin üzerinde basılı
         "satici_vkn": fatura.satici_vkn,
         "satici_unvan": fatura.satici_unvan,
-        "is_kolu": fatura.is_kolu.value,   # model girdisi -- leakage DEĞİL (gerçek
-        # masraf sisteminde satıcının sektörü zaten bilinir). Registry mimarisiyle
-        # is_kolu artık kimlikten geri-okunmaz, doğrudan taşınır.
-        "toplam_vergisiz_tutar": float(fatura.toplam_vergisiz_tutar),   # yeni
-        "toplam_kdv_tutari": float(fatura.toplam_kdv_tutari),            # yeni
-        "toplam_iskonto": float(fatura.toplam_iskonto),                  # yeni
+        # Sahis sirketinde isletmenin sahibi; tuzelde bos. Fiste basili -> model
+        # girdisi (bkz. schema.Fatura.satici_sahis_adi).
+        "satici_sahis_adi": fatura.satici_sahis_adi,
+        # is_kolu + kalem bazlı harcama_kategorisi etiket_to_dict'e taşındı.
+        "toplam_kdv_tutari": float(fatura.toplam_kdv_tutari),
         "genel_toplam": float(fatura.genel_toplam),
         "kalemler": [
             {
                 "kalem_no": k.kalem_no,
                 "aciklama": k.aciklama,
-                "harcama_kategorisi": k.harcama_kategorisi.value,
                 "miktar": k.miktar,
                 "birim": k.birim,
                 "birim_fiyat": float(k.birim_fiyat),
-                "iskonto_orani": k.iskonto_orani,
                 "kdv_orani": k.kdv_orani,
-                "ara_toplam": float(k.ara_toplam),
-                "kdv_tutari": float(k.kdv_tutari),
                 "satir_toplam": float(k.satir_toplam),
             }
             for k in fatura.kalemler
@@ -57,6 +52,8 @@ def etiket_to_dict(fatura) -> dict:
     return {
         "kayit_id": fatura.kayit_id,
         "fatura_no": fatura.fatura_no,
+        "is_kolu": fatura.is_kolu.value,
+        "harcama_kategorileri": [k.harcama_kategorisi.value for k in fatura.kalemler],
         "is_anomali": fatura.is_anomali,
         "anomali_turleri": fatura.anomali_turleri,
         "aciklama_kategorisi": fatura.aciklama_kategorisi,

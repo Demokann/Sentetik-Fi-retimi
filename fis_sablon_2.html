@@ -12,9 +12,8 @@
   değişmesin).
 
   Aritmetik fis_sablon_1.html ile AYNI olmak ZORUNDA (fis_uret.py:kalem_gosterimi):
-  fiyat sütunu iskonto ÖNCESİ brüt (KDV dahil), İNDİRİM gerçek düşüm,
-  brut - indirim = satir_toplam. İki şablon iki farklı aritmetik gösterirse
-  aşağı akıştaki model tutarsızlığı fiş tipiyle karıştırır.
+  fiyat sütunu KDV DAHİL brüt = satir_toplam. İki şablon iki farklı aritmetik
+  gösterirse aşağı akıştaki model tutarsızlığı fiş tipiyle karıştırır.
 
   .receipt-container sınıfı ZORUNLU: fis_uret.py ekran görüntüsünü bu seçiciyle
   alıyor (fis_sablon_1.html ile aynı seçici).
@@ -39,7 +38,6 @@
     .item-kdv { width: 34px; text-align: center; }
     .item-price { width: 90px; text-align: right; }
     .item-detail { color: #333; font-size: 11px; }
-    .item-discount { padding-left: 10px; }
 
     /* KDV tablosu: başlık ile veri satırı AYNI genişlikleri kullanmalı,
        yoksa sütunlar kayıyor ('KDV Oranı' başlığı 34px'e sığmıyordu). */
@@ -79,21 +77,11 @@
                 <span class="item-kdv">%{{ kalem.kdv_orani | int }}</span>
                 <span class="item-price">{{ kalem.brut_tutar | tutar }}</span>
             </div>
-            {% if kalem.indirim > 0 %}
-            <div class="row">
-                <span class="item-name item-discount">İndirim</span>
-                <span class="item-kdv"></span>
-                <span class="item-price">-{{ kalem.indirim | tutar }}</span>
-            </div>
-            {% endif %}
         </div>
         {% endfor %}
 
         <div class="solid"></div>
 
-        <!-- Toplamlar. ARA TOPLAM zorunlu: footer_kismi anomalisi vergisiz
-             tutar ile KDV'den yalnız birini bozuyor (bkz. fis_sablon_1.html). -->
-        <div class="row"><span>ARA TOPLAM</span><span>{{ toplam_vergisiz_tutar | tutar }} TL</span></div>
         <div class="row"><span>TOPLAM KDV</span><span>{{ toplam_kdv_tutari | tutar }} TL</span></div>
         <div class="row bold" style="font-size: 14px;"><span>TOPLAM</span><span>{{ genel_toplam | tutar }} TL</span></div>
 

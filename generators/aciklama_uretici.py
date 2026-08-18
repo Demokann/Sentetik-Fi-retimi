@@ -31,7 +31,6 @@ ACIKLAMA_KATEGORI_ORANLARI: dict[str, list[float]] = {
     # "kdv_kategori_uyumsuzlugu":        [50, 30, 10, 10], mevzuat değişimden ötürü kaldırıldı.
     "gecersiz_kimlik_no":              [58, 32, 3, 7],
     "genel_toplam":                    [45, 25, 20, 10],
-    "ara_toplam":                      [48, 27, 15, 10],
     "satir_toplami":                   [50, 28, 12, 10],
 }
 
@@ -63,7 +62,6 @@ ONCELIK_SIRASI = [
     "is_kolu_kategori_uyumsuzlugu",
     "gelecek_tarihli",
     "genel_toplam",
-    "ara_toplam",
     "satir_toplami",
     #"kdv_kategori_uyumsuzlugu",
     "kdv_tutari",
