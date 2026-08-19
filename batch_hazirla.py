@@ -369,6 +369,108 @@ def _cift_butunlugunu_sagla(
     return rapor
 
 
+# ---------------------------------------------------------------------------
+# KATEGORİ KOTASININ TÜRLER ARASI ORANSAL PAYLAŞIMI (2026-08-18)
+#
+# ESKİ DAVRANIŞ (sorun): kategori kotası (ör. yeterli) TÜM türler ve temiz
+# arasında TEK, paylaşımlı bir sayaçtı; `tur_sirasi` içindeki türler SIRAYLA
+# işlenip aynı kovadan çekiyordu -- ilk işlenen tür istediği kadar alabiliyor,
+# `ONCELIK_SIRASI`'nda OLMAYAN türler (ondalik_kaymasi, dusuk_ondalik_kaymasi)
+# en sona düştüğü için kova onlara gelene kadar boşalmış oluyordu. Ölçüldü:
+# ondalik_kaymasi'nin 120k havuzdaki yeterli oranı %58,7 iken seçilen batch'te
+# %2,9'a düşüyordu (25k'lık gerçek koşuda).
+#
+# YENİ DAVRANIŞ: "claims problem" / "bankruptcy problem" (iktisatta kıt kaynak
+# paylaşımı) literatüründeki ORANSAL (proportional) kural uygulanır. Döngü
+# başlamadan ÖNCE her tür için "talep" hesaplanır (kendi tavanına kadar, kendi
+# havuzundaki GERÇEK kategori dağılımı -- teorik ağırlık değil), talepler
+# toplamı kovadan büyükse HERKES aynı oranda (kova/toplam_talep) kısılır. Hiç
+# kimse sırf işlem sırasında geç kaldığı için SIFIRA düşmez.
+#
+# TEMİZ DOLGU AYRICA HESAPLANMAZ: kova, tüm türler + temiz için TEK bir
+# oransal paylaşımla bölünür (temiz'in claim'i de toplam_talep'e dahil edilir,
+# yoksa oran yanlış çıkar), ama temiz'in kendi payı sonuçta zaten mevcut
+# "kalan_boşluğu_doldur" mekanizmasına (aşağıda değişmeden duruyor) otomatik
+# düşer -- ANOMALİ türleri artık fazla tüketmediği için kalan tam olarak
+# temiz'in adil payına eşitleniyor (matematiksel özdeşlik, ayrı kod gerekmez).
+# ---------------------------------------------------------------------------
+
+def _hare_en_buyuk_kalan(ham_paylar: dict[str, float], toplam: int) -> dict[str, int]:
+    """Kesirli payları, toplamları TAM `toplam`'a eşit olacak şekilde tam
+    sayıya yuvarlar (Hare kotası / En Büyük Kalan yöntemi -- meclis sandalye
+    dağıtımında kullanılan klasik apportionment algoritması). Her pay önce
+    tabana yuvarlanır, kalan birimler en büyük ondalık artığı olanlara sırayla
+    dağıtılır."""
+    taban = {k: int(v) for k, v in ham_paylar.items()}
+    kalan = toplam - sum(taban.values())
+    if kalan <= 0:
+        return taban
+    artik_sirasi = sorted(ham_paylar, key=lambda k: ham_paylar[k] - taban[k], reverse=True)
+    for k in artik_sirasi[:kalan]:
+        taban[k] += 1
+    return taban
+
+
+def _kategori_kotalarini_oransal_hesapla(
+    tur_sirasi: list[str],
+    tur_havuzlari: dict[str, list[str]],
+    tavan_efektif: dict[str, int],
+    etiket_map: dict[str, dict],
+    kategori_hedefi: dict[str, int],
+    temiz_hedef_tahmini: int,
+    temiz_dogal_dagilim: "Counter[str]",
+    temiz_toplam: int,
+) -> dict[str, dict[str, int]]:
+    """Her tür için, her `aciklama_kategorisi`de KENDİ payına düşen kotayı
+    döner: {tur: {kategori: kota}}. Yöntem yukarıdaki modül notunda anlatılan
+    oransal (proportional) claims-problem kuralı."""
+    kategoriler = list(ACIKLAMA_KATEGORILERI)
+    tur_kategori_kotasi: dict[str, dict[str, int]] = {tur: {} for tur in tur_sirasi}
+
+    for kategori in kategoriler:
+        kova = kategori_hedefi.get(kategori, 0)
+
+        talepler: dict[str, float] = {}
+        for tur in tur_sirasi:
+            havuzdaki = sum(
+                1 for fno in tur_havuzlari[tur]
+                if etiket_map[fno]["aciklama_kategorisi"] == kategori
+            )
+            talepler[tur] = min(tavan_efektif.get(tur, 0), havuzdaki)
+
+        # TEMİZ de bir "talip": claim'i toplam_talep'e girmezse oran yanlış
+        # hesaplanır (bkz. modül notu). Kendi payı ayrıca saklanmaz -- mevcut
+        # kalan-boşluk mekanizması onu zaten örtük olarak verir.
+        if temiz_toplam > 0:
+            temiz_dogal_oran = temiz_dogal_dagilim.get(kategori, 0) / temiz_toplam
+            talepler["__temiz__"] = min(
+                temiz_dogal_dagilim.get(kategori, 0),
+                temiz_hedef_tahmini * temiz_dogal_oran,
+            )
+        else:
+            talepler["__temiz__"] = 0.0
+
+        toplam_talep = sum(talepler.values())
+        if toplam_talep <= kova or toplam_talep == 0:
+            # Kıtlık yok -- herkes talebini tam alır (tam sayıya yuvarlanır,
+            # kova zaten talebi karşılıyor, asirim gerekmez).
+            paylar = {tur: int(round(talepler[tur])) for tur in tur_sirasi}
+        else:
+            oran = kova / toplam_talep
+            ham_paylar = {tur: talepler[tur] * oran for tur in tur_sirasi}
+            # Yalniz TUR'lerin payi lazim (temiz kalan-bosluktan kendiliginden
+            # cikiyor) -- ama Hare toplami dogru cikmasi icin temiz'i de
+            # yuvarlama havuzuna katip sonra atiyoruz.
+            ham_paylar["__temiz__"] = talepler["__temiz__"] * oran
+            tam_paylar = _hare_en_buyuk_kalan(ham_paylar, kova)
+            paylar = {tur: tam_paylar[tur] for tur in tur_sirasi}
+
+        for tur in tur_sirasi:
+            tur_kategori_kotasi[tur][kategori] = paylar[tur]
+
+    return tur_kategori_kotasi
+
+
 def anomali_turu_kotali_sec(
     faturalar: list[dict],
     etiketler: list[dict],
@@ -465,13 +567,27 @@ def anomali_turu_kotali_sec(
     }
     _DOLMUS = 99  # kotası dolmuş kategori en sona
 
-    def _kategori_onceligi(fno: str) -> int:
+    # TÜR BAŞINA ORANSAL KATEGORİ KOTASI (bkz. modül başındaki not): her tür,
+    # "yeterli" gibi bol kategorilerden SIRAYA değil kendi ADİL PAYINA göre
+    # alır -- ONCELIK_SIRASI dışı türler (ondalik_kaymasi vb.) artık sırf en
+    # son işlendiği için sıfıra düşmüyor. temiz_hedef henüz kesin değil (anomali
+    # döngüsü bitmeden bilinmiyor); temiz_orani_min ile MUHAFAZAKAR bir tahmin
+    # yeterli -- yalnız claim büyüklüğü için kullanılıyor, nihai seçim etkilenmez.
+    _temiz_hedef_tahmini = int(hedef_toplam * temiz_orani_min)
+    tur_kategori_kotasi = _kategori_kotalarini_oransal_hesapla(
+        tur_sirasi, tur_havuzlari, tavan_efektif, etiket_map, kategori_hedefi,
+        _temiz_hedef_tahmini, _temiz_bolluk, len(temiz_no),
+    ) if kategori_hedefli else {tur: {} for tur in tur_sirasi}
+    tur_kategori_sayaci: dict[str, Counter] = {tur: Counter() for tur in tur_sirasi}
+
+    def _kategori_onceligi(fno: str, tur: str) -> int:
         """Küçük = önce seç. Kota KATI sınır DEĞİL: dolmuş kategori yalnız
-        sıralamada sona düşer, aksi halde tür tabanları karşılanamazdı."""
+        sıralamada sona düşer, aksi halde tür tabanları karşılanamazdı. Kota
+        artık GLOBAL değil, `tur`ün KENDİ oransal payı -- bkz. modül başı notu."""
         if not kategori_hedefli:
             return 0
         kat = etiket_map[fno]["aciklama_kategorisi"]
-        if kategori_sayaci[kat] >= kategori_hedefi.get(kat, 0):
+        if tur_kategori_sayaci[tur][kat] >= tur_kategori_kotasi[tur].get(kat, 0):
             return _DOLMUS
         return kategori_kitlik_sirasi.get(kat, _DOLMUS - 1)
 
@@ -486,10 +602,21 @@ def anomali_turu_kotali_sec(
         # bütçeli başka türün kotası gereksiz tüketilmesin. Kategori ÖNCE gelir:
         # tür tavanı zaten katı sınır, münhasırlık yalnız optimizasyon.
         sira.sort(key=lambda fno: (
-            _kategori_onceligi(fno),
+            _kategori_onceligi(fno, tur),
             sum(1 for t2 in etiket_map[fno]["anomali_turleri"] if t2 != tur and t2 in tur_sayaci),
         ))
+        # İKİ GEÇİŞLİ seçim (2026-08-18 düzeltmesi): sıralama TEK BAŞINA kotayı
+        # zorlamaz -- sıra baştan sona tek seferde taranıp ilk `ihtiyac` kadarı
+        # alınırsa, kıtlık sırasında ÖNDE olan (manipulatif/ai_uretimi/yetersiz)
+        # havuzu tek başına `ihtiyac`ı doldurabilir ve `yeterli`nin sırası HİÇ
+        # gelmez (ölçüldü: ondalik_kaymasi'nda kota 363 iken fiilen 0 seçiliyordu,
+        # çünkü diğer üç kategori zaten 572'lik ihtiyacı dolduruyordu). Bu yüzden
+        # 1. geçiş kotayı GERÇEK bir sınır olarak kontrol eder (aday kendi
+        # kategorisinde hâlâ açık kota varsa alınır, yoksa ERTELENİR); 2. geçiş
+        # (dolgu) yalnız `ihtiyac` hâlâ karşılanmadıysa ertelenenlerden tamamlar
+        # -- kota "KATI sınır DEĞİL" ilkesi (tür tabanı her zaman önceliklidir).
         alinan = 0
+        ertelenen: list[str] = []
         for fno in sira:
             if alinan >= ihtiyac:
                 break
@@ -498,12 +625,33 @@ def anomali_turu_kotali_sec(
             # taşıyorsa vazgeç -- tavan her tür için bağımsızdır.
             if any(tur_sayaci[t2] >= tavan_efektif[t2] for t2 in turleri if t2 != tur and t2 in tur_sayaci):
                 continue
+            kat = etiket_map[fno]["aciklama_kategorisi"]
+            if kategori_hedefli and tur_kategori_sayaci[tur][kat] >= tur_kategori_kotasi[tur].get(kat, 0):
+                ertelenen.append(fno)
+                continue
             secilen_anomalili.add(fno)
-            kategori_sayaci[etiket_map[fno]["aciklama_kategorisi"]] += 1
+            kategori_sayaci[kat] += 1
+            tur_kategori_sayaci[tur][kat] += 1
             for t2 in turleri:
                 if t2 in tur_sayaci:
                     tur_sayaci[t2] += 1
             alinan += 1
+
+        if alinan < ihtiyac and ertelenen:
+            for fno in ertelenen:
+                if alinan >= ihtiyac:
+                    break
+                turleri = etiket_map[fno]["anomali_turleri"]
+                if any(tur_sayaci[t2] >= tavan_efektif[t2] for t2 in turleri if t2 != tur and t2 in tur_sayaci):
+                    continue
+                kat = etiket_map[fno]["aciklama_kategorisi"]
+                secilen_anomalili.add(fno)
+                kategori_sayaci[kat] += 1
+                tur_kategori_sayaci[tur][kat] += 1
+                for t2 in turleri:
+                    if t2 in tur_sayaci:
+                        tur_sayaci[t2] += 1
+                alinan += 1
 
     # Küçük bir hedef_toplam'da tür kotalarının toplamı hedefin tamamını doldurup
     # temize yer bırakmayabilir; anomalili küme hedef bandın tavanına, çeşitlilik
