@@ -41,6 +41,9 @@ commit.txt
 kaggle_v10.zip
 ornek_kayit.txt
 
+# final_veriler'e özel tek seferlik düzeltme/kurtarma script'leri (bkz. commit.txt)
+final_veriler_tek_seferlik/
+
 # belirli klasörleri dahil et
 !data/urun_verileri/
 !data/hizmet_verileri/
