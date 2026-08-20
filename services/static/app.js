@@ -8,11 +8,13 @@ const resultListEl = document.getElementById("result-list");
 const answerEl = document.getElementById("result");
 
 // splitName -> { records: Map(kayitId -> record), pairGroups: Map(pairKey -> [kayitId,...]),
-//                turSayaci: Map(tur -> count) }
+//                turSayaci: Map(tur -> count),
+//                consistencyCache: Map(kayitId -> {durum, tutarli, turler}) }
 let splits = {};
 let activeSplit = null;
 const activeAnomaliFilter = new Set(); // secili tur adlari (coklu secim)
 let selectedKayitId = null;
+let sonucRenderNesli = 0; // liste yeniden render edilince eski async doğrulama yazımlarını iptal eder
 
 function pairKeyOf(rec) {
   return `${rec.satici_vkn}::${rec.fatura_no}`;
@@ -84,7 +86,7 @@ folderInput.addEventListener("change", async (event) => {
       for (const t of e.anomali_turleri) turSayaci.set(t, (turSayaci.get(t) || 0) + 1);
     }
 
-    splits[splitAdi] = { records, pairGroups, turSayaci };
+    splits[splitAdi] = { records, pairGroups, turSayaci, consistencyCache: new Map() };
   }
 
   renderSplitTabs();
@@ -196,6 +198,7 @@ function uygulaAnomaliFiltresi() {
 // --- Sonuç listesi ----------------------------------------------------------
 
 function renderResultList(kayitIdler) {
+  const nesil = ++sonucRenderNesli;
   if (!kayitIdler.length) {
     resultListEl.innerHTML = `<p class="empty-hint">Ara ya da filtrele.</p>`;
     return;
@@ -206,13 +209,122 @@ function renderResultList(kayitIdler) {
     const grup = split.pairGroups.get(r.pairKey);
     const esVar = grup && grup.length > 1;
     return `<div class="result-item" data-kayit-id="${kid}">
-      <span class="id">${kid} ${esVar ? '<span class="pair-tag">eş kayıt var</span>' : ""}</span>
+      <div class="result-item-top">
+        <span class="id">${kid} ${esVar ? '<span class="pair-tag">eş kayıt var</span>' : ""}</span>
+        <span class="consist-badge pending" data-consist="${kid}" title="Doğrulanıyor...">···</span>
+      </div>
       <span class="meta">${escapeHtml(r.saticiUnvan)} · ${r.genelToplam.toLocaleString("tr-TR", {minimumFractionDigits: 2})} ₺</span>
+      <div class="consist-types" data-consist-types="${kid}"></div>
     </div>`;
   }).join("");
   resultListEl.querySelectorAll(".result-item").forEach((el) =>
     el.addEventListener("click", () => selectRecord(el.dataset.kayitId))
   );
+
+  havuzlaCalistir(kayitIdler, async (kid) => {
+    const sonuc = await kayitTutarliligiGetir(kid);
+    if (nesil !== sonucRenderNesli) return; // liste bu arada değişti, yazma
+    guncelleConsistBadge(kid, sonuc);
+  });
+}
+
+// --- Liste satırlarının otomatik tutarlılık rozeti -----------------------
+
+async function havuzlaCalistir(ogeler, worker, esZamanli = 6) {
+  let idx = 0;
+  async function isci() {
+    while (idx < ogeler.length) {
+      const i = idx++;
+      await worker(ogeler[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(esZamanli, ogeler.length) }, isci));
+}
+
+// kalem.kdv_tutari (ve ara_toplam) JSON'a hiç export edilmiyor -- gerçek fişte de
+// hiç görülmediği için KASITLI. Sonucu: kdv_tutari anomalisi (kdv hesaplanırken
+// bozulur) ile satir_toplami anomalisi (kdv eklendikten SONRA bozulur) rule-based
+// tespitte aynı tek gözlemi (satir_toplam beklenenden sapıyor) üretir -- ayırt
+// edilemezler, ikinci bir bağımsız denklem yok (bkz. 2026-08-20 tur notu).
+// DİKKAT: fonksiyon `kdv_tutari`'yi YAPISAL OLARAK asla döndürmez (services/
+// validation_api.py: reconstruct edilen nesnede property tautolojik geçer, ayrıca
+// _HAM_JSON_GEREKTIREN_TURLER onu açıkça filtreler) -- o yüzden bunu "ortak"
+// (gerçekten eşleşen) kümesine KATMIYORUZ, ayrı bir `esdeger` alanında dürüstçe
+// "etiket X, tespit Y, bunlar bilinen bir isim çakışmasıdır" diye gösteriyoruz.
+function karsilastirSonuc(result) {
+  const fonksiyon = new Set(result.anomaly_types);
+  const etiket = new Set(result.ground_truth ? result.ground_truth.anomaly_types : []);
+  const ortak = [...fonksiyon].filter((t) => etiket.has(t));
+  let yalnizFonksiyon = [...fonksiyon].filter((t) => !etiket.has(t));
+  let yalnizEtiket = [...etiket].filter((t) => !fonksiyon.has(t));
+
+  let esdeger = null;
+  let not = null;
+  if (yalnizEtiket.includes("kdv_tutari") && yalnizFonksiyon.includes("satir_toplami")) {
+    yalnizEtiket = yalnizEtiket.filter((t) => t !== "kdv_tutari");
+    yalnizFonksiyon = yalnizFonksiyon.filter((t) => t !== "satir_toplami");
+    esdeger = { etiket: "kdv_tutari", tespit: "satir_toplami" };
+    not = "Kalem bazlı net KDV tutarı şemada yer almadığı için kural tabanlı sistem " +
+      "KDV ve satır toplamı anomalisini ayrıştıramayıp varsayılan olarak satır " +
+      "toplamı anomalisi kabul eder; bu beklenen bir veri modeli kısıtı olduğundan " +
+      "etiket uyumsuzluğu kontrolü kaldırılmıştır.";
+  }
+
+  const tutarli = yalnizFonksiyon.length === 0 && yalnizEtiket.length === 0;
+  return { fonksiyon, etiket, ortak, yalnizFonksiyon, yalnizEtiket, tutarli, esdeger, not };
+}
+
+async function kayitTutarliligiGetir(kayitId) {
+  const split = splits[activeSplit];
+  if (split.consistencyCache.has(kayitId)) return split.consistencyCache.get(kayitId);
+
+  const rec = split.records.get(kayitId);
+  const grup = split.pairGroups.get(rec.pairKey);
+  const esKayitId = grup && grup.length > 1 ? grup.find((k) => k !== kayitId) : null;
+  const esRec = esKayitId ? split.records.get(esKayitId) : null;
+
+  let sonuc;
+  try {
+    const response = await fetch("/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fatura: rec.data, es_fatura: esRec ? esRec.data : null }),
+    });
+    if (!response.ok) throw new Error(`${response.status}`);
+    const result = await response.json();
+    const { tutarli, etiket, not } = karsilastirSonuc(result);
+    sonuc = { durum: "ok", tutarli, turler: [...etiket], not };
+  } catch (err) {
+    sonuc = { durum: "hata" };
+  }
+  split.consistencyCache.set(kayitId, sonuc);
+  return sonuc;
+}
+
+function guncelleConsistBadge(kid, sonuc) {
+  const badge = resultListEl.querySelector(`[data-consist="${kid}"]`);
+  const typesEl = resultListEl.querySelector(`[data-consist-types="${kid}"]`);
+  if (!badge) return;
+
+  if (sonuc.durum === "hata") {
+    badge.textContent = "?";
+    badge.className = "consist-badge error";
+    badge.title = "Doğrulama alınamadı";
+    return;
+  }
+
+  if (sonuc.tutarli) {
+    badge.textContent = "✓";
+    badge.className = "consist-badge ok";
+    badge.title = sonuc.not ? `Tutarlı (not: ${sonuc.not})` : "Tutarlı";
+    if (typesEl && sonuc.turler.length) {
+      typesEl.innerHTML = sonuc.turler.map((t) => `<span class="chip mini">${escapeHtml(t)}</span>`).join("");
+    }
+  } else {
+    badge.textContent = "✗";
+    badge.className = "consist-badge bad";
+    badge.title = "Tutarsızlık var";
+  }
 }
 
 // --- Kayıt seçimi + doğrulama -----------------------------------------------
@@ -238,24 +350,37 @@ async function selectRecord(kayitId) {
       body: JSON.stringify({ fatura: rec.data, es_fatura: esRec ? esRec.data : null }),
     });
     if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
-    renderAnswer(await response.json());
+    const result = await response.json();
+    renderAnswer(result);
+    const { tutarli, etiket, not } = karsilastirSonuc(result);
+    const sonuc = { durum: "ok", tutarli, turler: [...etiket], not };
+    split.consistencyCache.set(kayitId, sonuc);
+    guncelleConsistBadge(kayitId, sonuc);
   } catch (err) {
     answerEl.innerHTML = `<p class="empty-hint">Hata: ${escapeHtml(err.message)}</p>`;
   }
 }
 
 function renderAnswer(result) {
-  const fonksiyon = new Set(result.anomaly_types);
-  const etiket = new Set(result.ground_truth ? result.ground_truth.anomaly_types : []);
-  const ortak = [...fonksiyon].filter((t) => etiket.has(t));
-  const yalnizFonksiyon = [...fonksiyon].filter((t) => !etiket.has(t));
-  const yalnizEtiket = [...etiket].filter((t) => !fonksiyon.has(t));
-  const tutarli = yalnizFonksiyon.length === 0 && yalnizEtiket.length === 0;
+  const { fonksiyon, ortak, yalnizFonksiyon, yalnizEtiket, tutarli, esdeger, not } = karsilastirSonuc(result);
 
   let html = `<div class="result-summary">
     <span class="status-badge ${result.is_anomaly ? "anomaly" : "clean"}">${result.is_anomaly ? "Anomali var" : "Temiz"}</span>
     <span class="status-badge ${tutarli ? "consistent" : "inconsistent"}">${tutarli ? "Tutarlı" : "Tutarsızlık"}</span>
   </div>`;
+
+  if (not) {
+    html += `<div class="inconsistency-note">${escapeHtml(not)}</div>`;
+  }
+  if (esdeger) {
+    // "Ortak" DEĞİL: fonksiyon `esdeger.etiket`'i (kdv_tutari) yapısal olarak asla
+    // döndürmez (bkz. karsilastirSonuc yorumu) -- bu yalnız etiket<->tespit eşleme notu.
+    html += `<div class="result-section"><h3>Eşdeğer sayılan (isim çakışması)</h3>
+      <div class="chip-row">
+        <span class="chip warn">${escapeHtml(esdeger.etiket)} (etiket)</span>
+        <span class="chip">${escapeHtml(esdeger.tespit)} (tespit)</span>
+      </div></div>`;
+  }
 
   if (!tutarli) {
     html += `<div class="inconsistency-note">Fonksiyonun tespit ettiği ile etiketteki gerçek anomali kümesi uyuşmuyor.</div>`;
