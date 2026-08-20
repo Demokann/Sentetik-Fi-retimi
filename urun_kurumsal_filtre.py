@@ -45,6 +45,7 @@ from pathlib import Path
 
 CSV_YOLU = Path(__file__).parent / "data" / "urun_verileri" / "temiz_urunler.csv"
 YEDEK_SON_EK = ".yedek_kurumsal"
+YEDEK_ARSIVI = Path("data/backups")
 
 
 def normalize(metin: str) -> str:
@@ -396,9 +397,13 @@ def main() -> None:
     # (ör. desen listesi guncellenip yeniden uygulanirsa) girdi ZATEN
     # filtrelenmis olur; korumasiz bir copy2 orijinal yedegi filtrelenmis
     # surumle ezip geri donusu imkansiz kilardi.
+    # Yedek data/backups/ altina tasinmis olabilir; iki yere de bak, yoksa
+    # ikinci kosu FILTRELENMIS dosyayi "yedek" diye kaydeder.
     yedek = yol.with_suffix(yol.suffix + YEDEK_SON_EK)
-    if yedek.exists():
-        print(f"\n[i] Yedek zaten var, KORUNUYOR (uzerine yazilmadi): {yedek}")
+    arsiv = YEDEK_ARSIVI / yol.parent.name / yedek.name
+    if yedek.exists() or arsiv.exists():
+        print(f"\n[i] Yedek zaten var, KORUNUYOR (uzerine yazilmadi): "
+              f"{yedek if yedek.exists() else arsiv}")
     else:
         shutil.copy2(yol, yedek)
     with open(yol, "w", encoding="utf-8", newline="") as f:
