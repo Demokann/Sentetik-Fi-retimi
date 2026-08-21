@@ -128,10 +128,20 @@ def saat_tohumlari_kur(faturalar: list[dict]) -> dict[str, str]:
     fiş eşitlendi" vakasi tanim geregi imkânsizdir: eşitlenen iki kayit zaten
     birebir ayniysa ayni saati basmalari DOĞRU davraniştir.
 
-    ŞABLON KASITLI OLARAK EŞİTLENMEZ (`sablon_sec` kayit_id'de kalir): çift
-    piksel piksel özdeşleşirse mükerrerlik perceptual hash ile çözülebilir hale
-    gelir. Farkli düzen + ayni saat, modeli içerik eşleştirmeye zorlayan tutarli
-    bir zor vaka birakir (ölçüldü: 62 çift).
+    ŞABLON ARTIK DOLAYLI OLARAK EŞİTLENİR (2026-08-21): `sablon_sec` kayit_id
+    yerine `fatura_no`'nun ŞEKLİNE (FTR önekli mi) bakıyor, ve fatura_no artık
+    VERİ ALANI olarak iki formatta üretiliyor (bkz.
+    field_generator.rastgele_fatura_no). Mükerrer/çakışma çiftlerinde f2 f1'in
+    fatura_no'sunu birebir devraldığı için (bkz. anomaly_injector.py) ikisi aynı
+    formatı, dolayısıyla aynı şablonu alır -- bu burada AYRICA kodlanan bir
+    "eşitleme" DEĞİL, format-şablon bağlantısının doğal sonucu.
+
+    ESKİ KARAR (2026-08-21'de kaldırıldı): şablon kasıtlı eşitlenmiyordu, çift
+    piksel piksel özdeşleşirse mükerrerlik perceptual hash ile trivial hale
+    gelir diye (62 çift ölçülmüştü). Artık geçerli değil -- gerekçe: görseller
+    şu an modele girmiyor (OCR kapsam dışı, CLAUDE.md açık iş #8) ve gerçek
+    dünyada aynı fiziksel belge zaten aynı türde olur (bir mükerrer yükleme iki
+    farklı belge TÜRÜNDE olamaz). Bkz. CLAUDE.md "fiş no formatı" kararı.
     """
     gruplar: dict[tuple[str, str], list[dict]] = {}
     for f in faturalar:
@@ -206,9 +216,21 @@ def sablon_sec(fatura: dict, sablonlar: list[Template]) -> Template:
     """Faturaya şablon atar. Tek şablonla üretilen 25k fişin hepsi ayni
     göründüğü için model fiş tipini değil tek bir düzeni öğreniyordu.
 
-    Seçim kayit_id'den DETERMİNİSTİK (bkz. _kayit_hash) ve etiketten
-    BAĞIMSIZ: fiş tipini anomaliye bağlamak görsele sahte sinyal ekler."""
-    return sablonlar[_kayit_hash(fatura["kayit_id"]) % len(sablonlar)]
+    Seçim `fatura_no`'nun ŞEKLİNE göre (2026-08-21): "FTR" önekli ise e-arşiv
+    formatı -> sablonlar[1] (varsayılan `fis_sablon_2.html`), düz sayıysa
+    yazarkasa formatı -> sablonlar[0] (varsayılan `fis_sablon_1.html`). Format
+    TEK KAYNAKTIR (bkz. field_generator.rastgele_fatura_no) -- burada yeniden
+    KARAR verilmez, yalnız OKUNUR. Etiketten (is_anomali/anomali_turleri)
+    bağımsız kalır: fiş tipini anomaliye bağlamak görsele sahte sinyal ekler.
+
+    ESKİ DAVRANIŞ (2026-08-21'e kadar): kayit_id hash'inden (bkz. _kayit_hash)
+    deterministik ama fatura_no'dan bağımsız seçilirdi. Bu, mükerrer/çakışma
+    çiftlerinin ~yarısının farklı şablonda render edilmesine yol açıyordu --
+    format artık şablonu belirlediği ve çift üyeleri aynı fatura_no'yu
+    taşıdığı için bu iç tutarsızlık artık yapısal olarak oluşamaz."""
+    if len(sablonlar) < 2:
+        return sablonlar[0]
+    return sablonlar[1] if fatura["fatura_no"].startswith("FTR") else sablonlar[0]
 
 
 BOLMELER = ("egitim", "dogrulama", "test")

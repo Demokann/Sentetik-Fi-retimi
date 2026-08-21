@@ -2149,14 +2149,54 @@ def rastgele_saat() -> str:
     return f"{random.randint(8, 20):02d}:{random.randrange(60):02d}"
 
 
-def rastgele_fatura_no(fatura_tarihi: str) -> str:
+# fis_uret.sablon_sec artik fatura_no'nun SEKLINE (FTR onekli mi) bakarak
+# sablon seciyor -- format burada VERI ALANI olarak karar veriliyor, render
+# katmani yalniz okuyor (bkz. fis_uret.py:sablon_sec docstring'i, 2026-08-21).
+SABLON2_PAYI = 0.5   # e-arsiv (FTR formatli) olma olasiligi
+YAZARKASA_FATURA_NO_USTSINIR = 999_999   # hane sayisi kisitlanmaz, 1-6 hane arasi dogal cikar
+
+# VKN-kapsamli fatura_no kaydi: yazarkasa formatinin kucuk sayi uzayi (~1M),
+# e-arsivin 9 haneli uzayina gore dogum gunu paradoksuna cok daha acik. Bu
+# kayit olmasa validators.fatura_no_tekrarlarini_bul'un bugun SADECE injekte
+# edilmis anomalileri bulmasi (CLAUDE.md SS7 -- dogal cakisma ~0) bozulurdu.
+_VKN_FATURA_NO_KAYDI: dict[str, set[str]] = {}
+
+
+def fatura_no_kaydini_sifirla() -> None:
+    """Yeni bir uretim kosusu basinda cagrilir (bkz. karisik_veri_seti_uret)."""
+    _VKN_FATURA_NO_KAYDI.clear()
+
+
+def rastgele_fatura_no(fatura_tarihi: str, satici_vkn: str) -> str:
     """
-    GİB e-fatura standardina uygun 16 haneli fatura no üretir:
-    3 harf (seri) + 4 haneli yil + 9 haneli sira no
+    Fis no'yu iki formattan biriyle uretir; hangi format render katmaninda
+    HANGI SABLONUN secilecegini de belirler (bkz. fis_uret.sablon_sec).
+      - e-arsiv (SABLON2_PAYI olasilikla): GIB e-fatura standardina uygun 16
+        hane, "FTR{yil}{9 haneli sira no, sifirla doldurulmus}".
+      - yazarkasa (kalan): duz, dolgusuz sayi (ör. "35"). Gercek yazarkasalarda
+        (ÖKC) fis no GİB tarafindan tanimli sabit bir genislige sahip degil,
+        cihaz ömrü boyunca müteselsil artan bir sayaçtir -- GÜNLÜK SIFIRLANMAZ,
+        yalniz Z raporu günlük hafizayi sifirlar (arastirildi, 2026-08-21).
+
+    Ayni VKN icin ayni deger bir kez daha cikarsa yeniden cekilir (bkz.
+    _VKN_FATURA_NO_KAYDI) -- guvenlik bu yuzden YAZARKASA_FATURA_NO_USTSINIR'in
+    buyuklugune bagimli degil.
     """
     yil = fatura_tarihi[:4]   # "2026-04-20" -> "2026", tarihle tutarli olsun
-    sira_no = random.randint(1, 999999999)
-    return f"FTR{yil}{sira_no:09d}"   # 09d -> 9 haneye sifirla tamamla
+    kullanilan = _VKN_FATURA_NO_KAYDI.setdefault(satici_vkn, set())
+    for _ in range(1000):   # pratikte ilk denemede biter, sonsuz donguye karsi ust sinir
+        if random.random() < SABLON2_PAYI:
+            sira_no = random.randint(1, 999999999)
+            aday = f"FTR{yil}{sira_no:09d}"   # 09d -> 9 haneye sifirla tamamla
+        else:
+            aday = str(random.randint(1, YAZARKASA_FATURA_NO_USTSINIR))
+        if aday not in kullanilan:
+            kullanilan.add(aday)
+            return aday
+    raise RuntimeError(
+        f"fatura_no uretilemedi (VKN {satici_vkn}): 1000 denemede benzersiz "
+        "deger bulunamadi -- bu VKN'nin fatura sayisi/sayi uzayi orantisiz olabilir."
+    )
 
 # Gerçek hayatta bir taksi ya da akaryakıt fişinde başka kalem OLMAZ -- fiş
 # tek kalemlidir. rastgele_fatura() bu açiklamalardan biri kalem olarak
@@ -2304,7 +2344,7 @@ def rastgele_fatura() -> Fatura:
         dar_havuzlar.setdefault(_kat, _havuz)
 
     fatura_tarihi = rastgele_tarih()
-    fatura_no = rastgele_fatura_no(fatura_tarihi)
+    fatura_no = rastgele_fatura_no(fatura_tarihi, satici_kimlik)
 
     # Bu iş kolunda toplam kaç benzersiz açiklama üretilebilir? artık csv dosyalarından verileri çekildiği için bu gereksiz olabilir
     toplam_musait_aciklama = sum(

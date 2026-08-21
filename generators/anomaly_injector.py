@@ -10,6 +10,7 @@ from schema import (
 from politika import kalem_limiti, limitli_kategoriler, zorunlu_kalem_limiti
 from generators.field_generator import (
     ACIKLAMA_HAVUZU, rastgele_birim, birim_sec, rastgele_miktar, rastgele_birim_fiyat,rastgele_fatura,
+    fatura_no_kaydini_sifirla,
     mutfak_anahtari,
     firma_kisit_anahtari,
     mukerrer_yukleme_zamanlari,
@@ -573,6 +574,7 @@ def karisik_veri_seti_uret(adet: int, anomali_orani: float) -> list[Fatura]:
     dahil edilmez — model bu alanlari GÖRMEMELİ, sadece değerlendirme
     (ground truth) amaçli kullanilmali.
     """
+    fatura_no_kaydini_sifirla()   # VKN-kapsamli cakisma-onleme kaydini bu kosu icin sifirla
     faturalar = [rastgele_fatura() for _ in range(adet)]
 
     anomali_sayisi = int(adet * anomali_orani)
