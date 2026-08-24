@@ -57,7 +57,6 @@ final_veriler_tek_seferlik/
 # mevcut "belirli klasörleri dahil et" bloğunun altına
 !data/soyisimler.sql
 !data/firma_registry.csv
-!data/firma_adlari_osm.csv
 # uretilen veri degil, KONFIGURASYON: politika limitleri (bkz. politika.py)
 !data/politika_limitleri.json
 
