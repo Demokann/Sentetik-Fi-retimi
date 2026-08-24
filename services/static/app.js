@@ -26,11 +26,125 @@ function kayitIdNormalize(input) {
   return "K" + temiz.padStart(7, "0");
 }
 
+// --- final_veriler_en adaptörü --------------------------------------------
+// data/final_veriler_en (İngilizce alan adları + hashlenmiş record_id) klasörü
+// yüklendiğinde, ORİJİNAL dosyalara dokunmadan, yalnız bellekte final_veriler'in
+// (Türkçe) şekline çevirir -- alttaki tüm kod (merge, arama, /validate) TEK
+// şema (Türkçe) bilir, ikinci bir yol eklemez. alan_adlari.py'nin ürettiği
+// eşlemelerin BİREBİR TERSİ (iki kaynak sapmasın diye tabloları oradan kopyala,
+// yeniden icat etme).
+const EN_BUSINESS_LINE = {
+  restaurant: "restoran", grocery_store: "market", hotel: "otel",
+  office_supplies_store: "ofis_tedarik", technology: "teknoloji",
+  consulting_firm: "danismanlik_firmasi", logistics_firm: "lojistik_firmasi",
+  transport_provider: "ulasim_saglayici", event_organizer: "organizasyon",
+  personal_care_store: "kisisel_bakim", clothing_store: "giyim_magazasi",
+};
+const EN_EXPENSE_CATEGORY = {
+  food_service: "yemek_hizmeti", basic_groceries: "temel_gida",
+  transport_service: "ulasim_hizmeti", individual_transport: "ulasim_bireysel",
+  accommodation: "konaklama", office_supplies: "ofis_sarf_malzeme",
+  office_furniture: "ofis_mobilya", tech_equipment: "teknoloji_ekipman",
+  software_license: "yazilim_lisans", consulting: "danismanlik",
+  alcohol: "alkol", entertainment: "eglence", tobacco: "tutun_urunleri",
+  gambling: "kumar", cleaning_supplies: "temizlik", personal_care: "kisisel_bakim",
+  clothing: "giyim", other: "diger",
+};
+const EN_ANOMALY_TYPE = {
+  future_dated: "gelecek_tarihli", invalid_tax_id: "gecersiz_kimlik_no",
+  business_category_mismatch: "is_kolu_kategori_uyumsuzlugu",
+  prohibited_category: "yasakli_kategori", limit_exceeded: "limit_asimi",
+  vat_amount_mismatch: "kdv_tutari", line_total_mismatch: "satir_toplami",
+  decimal_shift_high: "ondalik_kaymasi", decimal_shift_low: "dusuk_ondalik_kaymasi",
+  total_mismatch: "genel_toplam", footer_mismatch: "footer_kismi",
+  duplicate_upload: "mukerrer_fis_yukleme", receipt_no_collision: "fatura_no_cakismasi",
+  line_subtotal_mismatch: "ara_toplam",
+};
+const EN_NOTE_QUALITY = {
+  sufficient: "yeterli", insufficient: "yetersiz",
+  manipulative: "manipulatif", ai_generated: "ai_uretimi",
+};
+const EN_APPROVAL_STATUS = {
+  approved: "onaylandi", rejected: "onaylanmadi", review_required: "gozden_gecirilecek",
+};
+
+function enKayitMi(girdiKaydi) {
+  return girdiKaydi != null && Object.prototype.hasOwnProperty.call(girdiKaydi, "record_id");
+}
+
+// "20.07.2026" -> "2026-07-20"
+function enTarihToISO(ddmmyyyy) {
+  const [gun, ay, yil] = ddmmyyyy.split(".");
+  return `${yil}-${ay}-${gun}`;
+}
+
+// "02.06.2026 11:47" -> "2026-06-02T11:47:00+03:00"
+// Saniye/saat dilimi varsayımı: zaman_damgasi_tr (alan_adlari.py) üretimde
+// bunları hep ":00"/"+03:00" sabit yazıyor, geri dönüşte güvenle varsayılabilir.
+function enZamanDamgasiToISO(dmyHm) {
+  const [tarih, saat] = dmyHm.split(" ");
+  return `${enTarihToISO(tarih)}T${saat}:00+03:00`;
+}
+
+function enGirdiyiCevir(g, kayitIdHaritasi) {
+  const kayitId = kayitIdHaritasi.get(g.record_id) || g.record_id;
+  return {
+    kayit_id: kayitId,
+    fatura_no: g.receipt_no,
+    fatura_tarihi: enTarihToISO(g.date),
+    yukleme_zamani: enZamanDamgasiToISO(g.upload_timestamp),
+    saat: g.time || "",
+    satici_vkn: g.seller_tax_id,
+    satici_unvan: g.company,
+    kalemler: g.items.map((it, i) => ({
+      kalem_no: i + 1,
+      aciklama: it.item_description,
+      miktar: it.quantity,
+      birim: it.unit,
+      birim_fiyat: it.unit_price,
+      kdv_orani: it.vat_rate,
+      satir_toplam: it.line_total,
+    })),
+    toplam_kdv_tutari: g.total_vat_amount,
+    genel_toplam: g.total_amount,
+    aciklama_metni: g.user_note || "",
+  };
+}
+
+function enEtiketiCevir(e, kayitIdHaritasi) {
+  const kayitId = kayitIdHaritasi.get(e.record_id) || e.record_id;
+  return {
+    kayit_id: kayitId,
+    fatura_no: e.receipt_no,
+    cift_grup_id: e.duplicate_group_id || "",
+    is_kolu: EN_BUSINESS_LINE[e.business_line] || e.business_line,
+    harcama_kategorileri: e.expense_categories.map((k) => EN_EXPENSE_CATEGORY[k] || k),
+    is_anomali: e.is_anomaly,
+    anomali_turleri: e.anomaly_types.map((t) => EN_ANOMALY_TYPE[t] || t),
+    aciklama_kategorisi: EN_NOTE_QUALITY[e.note_quality] || e.note_quality,
+    onay_durumu: EN_APPROVAL_STATUS[e.approval_status] || e.approval_status,
+  };
+}
+
 // --- Klasör yükleme -----------------------------------------------------
 
 folderInput.addEventListener("change", async (event) => {
   const files = Array.from(event.target.files);
   const girdiFiles = files.filter((f) => f.name.endsWith("_girdi.json"));
+
+  // kayit_id_esleme.json (fis_uret.py üretiyor, gorsel adlandirma icin -- kayit_id
+  // -> record_id yonunde) zaten final_veriler_en klasorunde var; ikinci bir dosya
+  // uretmek yerine burada TERS cevirip (record_id -> kayit_id) kullaniyoruz.
+  const haritaFile = files.find((f) => f.name === "kayit_id_esleme.json");
+  let kayitIdHaritasi = new Map();
+  if (haritaFile) {
+    try {
+      const ham = JSON.parse(await haritaFile.text()); // kayit_id -> record_id
+      kayitIdHaritasi = new Map(Object.entries(ham).map(([kayitId, recordId]) => [recordId, kayitId]));
+    } catch (err) {
+      console.warn("kayit_id_esleme.json okunamadı:", err);
+    }
+  }
 
   splits = {};
   let atlananKisiselBakim = 0;
@@ -50,6 +164,17 @@ folderInput.addEventListener("change", async (event) => {
     } catch (err) {
       console.warn(`${splitAdi} okunamadı:`, err);
       continue;
+    }
+
+    if (enKayitMi(girdi[0])) {
+      if (!haritaFile) {
+        console.warn(
+          `${splitAdi}: kayit_id_esleme.json seçilmedi -- kayit_id yerine ` +
+          "opak record_id kullanılacak (ID ile arama çalışmaz)."
+        );
+      }
+      girdi = girdi.map((g) => enGirdiyiCevir(g, kayitIdHaritasi));
+      etiket = etiket.map((e) => enEtiketiCevir(e, kayitIdHaritasi));
     }
 
     const etiketMap = new Map(etiket.map((e) => [e.kayit_id, e]));

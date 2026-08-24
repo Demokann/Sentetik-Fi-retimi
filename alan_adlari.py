@@ -81,7 +81,7 @@ def zaman_damgasi_tr(iso_zaman: str) -> str:
 
 
 def girdi_donustur(fatura: dict, saat_tohumlari: dict[str, str]) -> dict:
-    tohum = saat_tohumlari.get(fatura["kayit_id"], fatura["kayit_id"])
+    tohum = str(saat_tohumlari.get(fatura["kayit_id"], fatura["kayit_id"]))
     return {
         "record_id": opak_id(fatura["kayit_id"]),
         "company": fatura["satici_unvan"],
