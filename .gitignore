@@ -1,63 +1,69 @@
+# --- Python ---
 venv/
 __pycache__/
 *.pyc
+
+# --- Ortam / gizli ---
 .env
 
+# --- Editör / OS ---
 .DS_Store
-deneme.py
 
-kaggle_v8_yukleme.zip
-kaggle_v9_yukleme.zip
-kaggle_ayaga_kaldırma.ipynb
-market_urunleri.csv.yedek_niteleyici
-aciklama_claude.py
-aciklama_gemini.py
-firma_adlari_cikar.py
-kaggle_v10
-
-simüle_edilmek_istenen.md
+# --- Claude Code (oturum/plan durumu, proje referans dosyası) ---
 .claude/*
 CLAUDE.md
+
+# --- Geliştirme sırasında üretilen deneme/debug dosyaları ---
+deneme.py
 deneme.jsonl
 deneme.md
 deneme2.md
 deneme2.jsonl
-
-docs/*
-# ...ama diyagramlar README'de kullanılıyor, onlar repoya girsin
-!docs/diagrams/
-whaatif.py
 deneme_80.md
-#aciklama dosyalarını ignore et
-aciklama_mdler/*
-# data içindeki her şeyi ignore et
-data/*
-qwen3*
-trendyol*
+
+# --- Referans / kullanılmayan sağlayıcı script'leri ---
+aciklama_claude.py
+aciklama_gemini.py
+firma_adlari_cikar.py
+whaatif.py
+
+# --- Kaggle paket arşivleri ve notebook ---
+kaggle_v8_yukleme.zip
+kaggle_v9_yukleme.zip
+kaggle_v10
+kaggle_v10.zip
+kaggle_ayaga_kaldırma.ipynb
+
+# --- Ürün havuzu yedek dosyaları ---
+market_urunleri.csv.yedek_niteleyici
 temiz_urunler.csv.yedek
 anomali_urunler.csv.yedek
 temiz_urunler.csv.yedek_kurumsal
+
+# --- Yerel model ağırlıkları ---
+qwen3*
+trendyol*
+
+# --- Notlar, loglar, tek seferlik kayıtlar ---
+simüle_edilmek_istenen.md
 commit.txt
-kaggle_v10.zip
 ornek_kayit.txt
 
-# final_veriler'e özel tek seferlik düzeltme/kurtarma script'leri (bkz. commit.txt)
+# --- Toplu üretilen açıklama MD çıktıları ---
+aciklama_mdler/*
+
+# --- final_veriler'e özel tek seferlik düzeltme/kurtarma script'leri (bkz. commit.txt) ---
 final_veriler_tek_seferlik/
 
-# belirli klasörleri dahil et
-!data/urun_verileri/
-!data/hizmet_verileri/
-!data/anomali_verileri/
+# --- docs/: yalnız diyagramlar repoya girsin (README'de kullanılıyor) ---
+docs/*
+!docs/diagrams/
 
-# bu klasörlerin içindeki dosyaları dahil et
-!data/urun_verileri/*.csv
-!data/hizmet_verileri/*.csv
-!data/anomali_verileri/*.csv
-
-# mevcut "belirli klasörleri dahil et" bloğunun altına
-!data/soyisimler.sql
-!data/firma_registry.csv
-# uretilen veri degil, KONFIGURASYON: politika limitleri (bkz. politika.py)
+# --- data/: yalnız KONFİGÜRASYON repoya girsin, veri havuzları GİRMEZ ---
+# urun_verileri/, hizmet_verileri/, anomali_verileri/, firma_registry.csv,
+# companies/, soyisimler.sql -- hepsi sentetik üretimin TOHUM verisi; repo
+# klonu yalnız KODU alır, bu havuzları almaz (üretimi baştan çalıştırmak için
+# ayrıca sağlanmaları gerekir). politika_limitleri.json istisna: bu üretilen
+# veri değil, politika.py'nin çalışması için gereken konfigürasyon.
+data/*
 !data/politika_limitleri.json
-
-/rapor_analiz.py
