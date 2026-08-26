@@ -21,6 +21,7 @@ def fatura_to_dict(fatura) -> dict:
         "saat": fatura.saat,                       # fişin üzerinde basılı
         "satici_vkn": fatura.satici_vkn,
         "satici_unvan": fatura.satici_unvan,
+        "adres": fatura.adres,
         # Sahis sirketinde isletmenin sahibi; tuzelde bos. Fiste basili -> model
         # girdisi (bkz. schema.Fatura.satici_sahis_adi).
         "satici_sahis_adi": fatura.satici_sahis_adi,

@@ -200,6 +200,7 @@ class Fatura(BaseModel):
     saat: str = ""
     satici_vkn: str  # 10 haneli
     satici_unvan: str
+    adres: str = ""
     # Sahis sirketinde ISLETME ADI ile SAHSIN ADI fiste AYRI IKI SATIRDIR
     # (gercek fis: "SAYLA MANTI" / "FEYYAZ ESEN", "FIORE ART PIZZA" / "OSMAN TETIK").
     # Tuzel kisilerde BOS. Fiste basili oldugu icin model girdisidir (OCR okur),

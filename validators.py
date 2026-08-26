@@ -463,13 +463,23 @@ def veri_seti_dogrula(faturalar: list[Fatura], hedef_oran: float, tolerans: floa
     # Alan alan Fatura kuran enjektörler (AnomaliliFatura) yeni alanlari tasimayi
     # unutabiliyor; alan o zaman sessizce bos kalir (olculdu: yukleme_zamani,
     # 482/12000). Yeni bir zorunlu alan eklendiginde BURAYA da ekle.
-    for alan in ("yukleme_zamani", "saat"):
+    for alan in ("yukleme_zamani", "saat", "adres"):
         bos = sum(1 for f in faturalar if not getattr(f, alan, ""))
         if bos:
             uyarilar.append(
                 f"{alan} BOŞ olan {bos} fatura var; bir anomali enjektörü alani "
                 f"tasimiyor (AnomaliliFatura kurucularina bak)."
             )
+
+    # Adres VKN'nin aksine hiçbir anomali tarafindan bagimsiz bozulmaz -- ayni
+    # unvanin farkli adresi HER ZAMAN bug'dir, gecersiz_kimlik_no gibi bir
+    # muafiyete gerek yok.
+    ad_to_adresler: dict[str, set[str]] = {}
+    for f in faturalar:
+        ad_to_adresler.setdefault(f.satici_unvan, set()).add(f.adres)
+    celiskili_adres = {ad: adresler for ad, adresler in ad_to_adresler.items() if len(adresler) > 1}
+    if celiskili_adres:
+        uyarilar.append(f"Ayni firma adi farkli adreslerle eslesmis: {len(celiskili_adres)} unvan.")
 
     # Iliskisel cift SIMETRIK etiketlenmeli: tur OLAYI isaretler, kayit bazli
     # karari onay_durumu verir. Tek uye etiketliyse enjektorde regresyon var.

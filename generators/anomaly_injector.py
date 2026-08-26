@@ -251,6 +251,7 @@ def genel_toplam_anomali_uret(fatura: Fatura) -> Fatura:
         saat=fatura.saat,
         satici_vkn=fatura.satici_vkn,
         satici_unvan=fatura.satici_unvan,
+        adres=fatura.adres,
         is_kolu=fatura.is_kolu,   # yeni
         kalemler=fatura.kalemler,
         sahte_toplam_vergisiz_tutar=getattr(fatura, "sahte_toplam_vergisiz_tutar", None),
@@ -282,6 +283,7 @@ def footer_kismi_anomali_uret(fatura: Fatura) -> Fatura:
         saat=fatura.saat,
         satici_vkn=fatura.satici_vkn,
         satici_unvan=fatura.satici_unvan,
+        adres=fatura.adres,
         kalemler=fatura.kalemler,
         is_kolu=fatura.is_kolu,   # yeni
         sahte_genel_toplam=mevcut_sahte_genel_toplam,
@@ -539,6 +541,7 @@ def _fatura_no_cakismasi_uygula(f1: Fatura, f2: Fatura) -> Fatura:
     BAĞIMSIZDIR (her biri kendi anomali profiline göre atanir)."""
     f2.satici_vkn = f1.satici_vkn      # anomalinin gerçek sayilmasi için şart
     f2.satici_unvan = f1.satici_unvan  # ayni VKN = ayni firma tutarliliğini korumak için şart
+    f2.adres = f1.adres
     f2.is_kolu = f1.is_kolu            # aynı is_kolu (zaten eşit) -- değişmezi açıkça garanti et
     f2 = fatura_no_tekrari_anomali_uret(f2, f1.fatura_no)
     f2.is_anomali = True

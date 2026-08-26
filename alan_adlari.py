@@ -85,6 +85,7 @@ def girdi_donustur(fatura: dict, saat_tohumlari: dict[str, str]) -> dict:
     return {
         "record_id": opak_id(fatura["kayit_id"]),
         "company": fatura["satici_unvan"],
+        "address": fatura["adres"],
         "seller_tax_id": fatura["satici_vkn"],
         "receipt_no": fatura["fatura_no"],
         "date": tarih_tr(fatura["fatura_tarihi"]),   # DD.MM.YYYY -- ISO'dan vazgeçildi
