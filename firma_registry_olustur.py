@@ -34,6 +34,7 @@ from generators.field_generator import (
     rastgele_firma_adi, rastgele_sahis_kisi_adi, rastgele_vkn, rastgele_tckn,
     FIRMA_TURU_AGIRLIK,
 )
+from firma_registry_adres_uret import adres_uret
 
 OSM_CSV = Path("data/firma_adlari_osm.csv")
 REGISTRY_CSV = Path("data/firma_registry.csv")
@@ -182,7 +183,7 @@ def registry_yaz(kayitlar: list[dict]) -> None:
     with open(REGISTRY_CSV, "w", newline="", encoding="utf-8") as f:
         yazici = csv.DictWriter(
             f, fieldnames=["firma_id", "is_kolu", "firma_turu", "satici_unvan",
-                           "satici_kimlik", "sahis_adi", "kaynak"]
+                           "satici_kimlik", "sahis_adi", "kaynak", "adres"]
         )
         yazici.writeheader()
         yazici.writerows(kayitlar)
@@ -206,6 +207,9 @@ def main():
     print(f"Registry üretiliyor (taban/is_kolu={args.taban_per_iskolu}, "
           f"osm-pay={args.osm_pay}, seed={args.seed})...")
     kayitlar = registry_uret(args.taban_per_iskolu, args.osm_pay)
+    adres_rnd = random.Random(args.seed)
+    for satir in kayitlar:
+        satir["adres"] = adres_uret(adres_rnd)
     registry_yaz(kayitlar)
 
     kaynak_sayim = Counter(k["kaynak"] for k in kayitlar)

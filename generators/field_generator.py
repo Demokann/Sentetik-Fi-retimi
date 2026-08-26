@@ -2284,6 +2284,7 @@ def firma_registry_yukle() -> dict[IsKolu, list[dict]]:
                 "kimlik": satir["satici_kimlik"],
                 # Eski registry'de kolon yok -> bos (sahis adi basilmaz, kirilmaz).
                 "sahis_adi": (satir.get("sahis_adi") or "").strip(),
+                "adres": (satir.get("adres") or "").strip(),
             })
     if atlanan:
         import warnings
@@ -2323,6 +2324,7 @@ def rastgele_fatura() -> Fatura:
     satici_kimlik = firma["kimlik"]
     satici_adi = firma["unvan"]
     satici_sahis_adi = firma.get("sahis_adi", "")
+    satici_adres = firma.get("adres", "")
 
     # 2b. Mutfak kısıtı: firma adı dar bir mutfağı işaret ediyorsa (çiğköfteci,
     # balıkçı, pizzacı...) yemek kalemleri o mutfağın menüsünden seçilir.
@@ -2376,6 +2378,7 @@ def rastgele_fatura() -> Fatura:
         saat=rastgele_saat(),
         satici_vkn=satici_kimlik,
         satici_unvan=satici_adi,
+        adres=satici_adres,
         satici_sahis_adi=satici_sahis_adi,
         is_kolu=is_kolu,   # yeni
         kalemler=kalemler,
