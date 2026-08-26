@@ -3448,6 +3448,11 @@ def _tek_fatura_isleme_ham(fatura, etiket, model, host, keep_alive: str | int | 
     yetersiz/manipulatif için Verbalized Sampling akışına (çok-aday) dallanır.
     """
     kategori = etiket["aciklama_kategorisi"]
+    # main.py:etiket_to_dict kararıyla girdide yok, prompt kurmak için kalemlere geri ekleniyor.
+    fatura = {**fatura, "kalemler": [
+        {**k, "harcama_kategorisi": kat}
+        for k, kat in zip(fatura["kalemler"], etiket["harcama_kategorileri"])
+    ]}
     system_prompt, user_prompt, meta = prompt_olustur(fatura, kategori, etiket.get("anomali_turleri"))
     # 2-cümleye açık kategorilerde (manipulatif/ai) truncation'ı önlemek için token
     # limiti yükseltildi; yetersiz kısa olduğu için düşük tutulur.

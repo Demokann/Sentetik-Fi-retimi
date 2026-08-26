@@ -75,6 +75,7 @@ def batch_kaydi_olustur(fatura: dict, etiket: dict, aciklama_kategorisi_override
         "fatura_tarihi": fatura["fatura_tarihi"],
         "satici_unvan": fatura["satici_unvan"],
         "kalemler": fatura["kalemler"],
+        "harcama_kategorileri": etiket["harcama_kategorileri"],  # kalem siralı, prompt kurmak için gerekli
         "aciklama_kategorisi": aciklama_kategorisi_override if aciklama_kategorisi_override is not None else etiket["aciklama_kategorisi"],
         "is_anomali": etiket["is_anomali"],
         "anomali_turleri": etiket["anomali_turleri"],
@@ -114,16 +115,6 @@ def dengeli_ornekle(
 # fatura seçilsin" sorusunun asıl cevabıdır.
 # ---------------------------------------------------------------------------
 
-# is_kolu, fatura_to_dict() tarafından faturalar.json'a export edilmiyor
-# (main.py:fatura_to_dict) -- faturalar.json'a DOKUNMADAN (CLAUDE.md §3) çeşitlilik
-# ölçmek için baskın kalem kategorisini iş kolu yerine proxy olarak kullanıyoruz.
-def _baskin_kategori(fatura: dict) -> str:
-    if not fatura["kalemler"]:
-        return "bilinmeyen"
-    sayac = Counter(k["harcama_kategorisi"] for k in fatura["kalemler"])
-    return sayac.most_common(1)[0][0]
-
-
 def _tutar_bucket(genel_toplam: float, sinirlar: tuple[float, float, float] = (500, 2000, 8000)) -> str:
     if genel_toplam < sinirlar[0]:
         return "dusuk"
@@ -134,12 +125,12 @@ def _tutar_bucket(genel_toplam: float, sinirlar: tuple[float, float, float] = (5
     return "cok_yuksek"
 
 
-def _cesitli_ornekle(fatura_no_listesi: list[str], fatura_map: dict[str, dict], n: int, rnd: random.Random) -> list[str]:
+def _cesitli_ornekle(fatura_no_listesi: list[str], fatura_map: dict[str, dict], etiket_map: dict[str, dict], n: int, rnd: random.Random) -> list[str]:
     """
-    (baskin_kategori, tutar_bucket) katmanlarina round-robin dağıtarak n
-    kayıt seçer -- düz random.sample yerine, bol havuzlarda dar bir örnek
-    deseni (ör. hep ayni iş kolundan/tutar araligindan) öğrenilmesin diye.
-    n >= havuz büyüklüğü ise hepsini döner.
+    (is_kolu, tutar_bucket) katmanlarina round-robin dağıtarak n kayıt seçer --
+    düz random.sample yerine, bol havuzlarda dar bir örnek deseni (ör. hep ayni
+    iş kolundan/tutar araligindan) öğrenilmesin diye. n >= havuz büyüklüğü ise
+    hepsini döner.
     """
     if n <= 0:
         return []
@@ -149,7 +140,7 @@ def _cesitli_ornekle(fatura_no_listesi: list[str], fatura_map: dict[str, dict], 
     katmanlar: dict[tuple[str, str], list[str]] = {}
     for fno in fatura_no_listesi:
         f = fatura_map[fno]
-        anahtar = (_baskin_kategori(f), _tutar_bucket(f["genel_toplam"]))
+        anahtar = (etiket_map[fno]["is_kolu"], _tutar_bucket(f["genel_toplam"]))
         katmanlar.setdefault(anahtar, []).append(fno)
     for grup in katmanlar.values():
         rnd.shuffle(grup)
@@ -165,7 +156,7 @@ def _cesitli_ornekle(fatura_no_listesi: list[str], fatura_map: dict[str, dict], 
     return secilen
 
 
-def _cesitli_sira(fatura_no_listesi: list[str], fatura_map: dict[str, dict], rnd: random.Random) -> list[str]:
+def _cesitli_sira(fatura_no_listesi: list[str], fatura_map: dict[str, dict], etiket_map: dict[str, dict], rnd: random.Random) -> list[str]:
     """_cesitli_ornekle ile ayni katman/round-robin mantığı, ama bir alt küme
     değil TÜM listenin çeşitlilik-gözeten bir sırasını döner -- çağıran taraf
     bu sırada tek tek ilerleyip her adayı ayrı ayrı kabul/red edebilsin diye
@@ -173,7 +164,7 @@ def _cesitli_sira(fatura_no_listesi: list[str], fatura_map: dict[str, dict], rnd
     katmanlar: dict[tuple[str, str], list[str]] = {}
     for fno in fatura_no_listesi:
         f = fatura_map[fno]
-        anahtar = (_baskin_kategori(f), _tutar_bucket(f["genel_toplam"]))
+        anahtar = (etiket_map[fno]["is_kolu"], _tutar_bucket(f["genel_toplam"]))
         katmanlar.setdefault(anahtar, []).append(fno)
     for grup in katmanlar.values():
         rnd.shuffle(grup)
@@ -596,7 +587,7 @@ def anomali_turu_kotali_sec(
         if ihtiyac <= 0:
             continue
         adaylar = [fno for fno in tur_havuzlari[tur] if fno not in secilen_anomalili]
-        sira = _cesitli_sira(adaylar, fatura_map, rnd)
+        sira = _cesitli_sira(adaylar, fatura_map, etiket_map, rnd)
         # Sıralama İKİ eksenli: önce kategori kotası açık olanlar (kompozisyon),
         # sonra münhasırlık -- başka türlere daha az sahip aday önce denenir ki kıt
         # bütçeli başka türün kotası gereksiz tüketilmesin. Kategori ÖNCE gelir:
@@ -661,7 +652,7 @@ def anomali_turu_kotali_sec(
     if anomalili_kirpildi:
         # Kırparken kategori hedefini gözet: kotası AÇIK olanı koru, fazlalığı
         # doymuş kategoriden at (rastgele kırpma manipulatifi hedefin altına atardı).
-        kirpma_sirasi = _cesitli_sira(list(secilen_anomalili), fatura_map, rnd)
+        kirpma_sirasi = _cesitli_sira(list(secilen_anomalili), fatura_map, etiket_map, rnd)
         if kategori_hedefli:
             tutulan: Counter = Counter()
 
@@ -696,17 +687,17 @@ def anomali_turu_kotali_sec(
             alinacak = min(acik, temiz_hedef - len(secilen_temiz))
             if alinacak <= 0:
                 continue
-            pay = _cesitli_ornekle(temiz_kat[kat], fatura_map, alinacak, rnd)
+            pay = _cesitli_ornekle(temiz_kat[kat], fatura_map, etiket_map, alinacak, rnd)
             secilen_temiz.extend(pay)
             kategori_sayaci[kat] += len(pay)
         # Hedefler karşılandıktan sonra yer kaldıysa kalanı doğal dağılımdan tamamla.
         if len(secilen_temiz) < temiz_hedef:
             kalanlar = [f for f in temiz_no if f not in set(secilen_temiz)]
             secilen_temiz.extend(
-                _cesitli_ornekle(kalanlar, fatura_map, temiz_hedef - len(secilen_temiz), rnd)
+                _cesitli_ornekle(kalanlar, fatura_map, etiket_map, temiz_hedef - len(secilen_temiz), rnd)
             )
     else:
-        secilen_temiz = _cesitli_ornekle(temiz_no, fatura_map, temiz_hedef, rnd)
+        secilen_temiz = _cesitli_ornekle(temiz_no, fatura_map, etiket_map, temiz_hedef, rnd)
 
     cift_raporu = _cift_butunlugunu_sagla(
         secilen_anomalili, secilen_temiz, etiket_map, fatura_map, rnd
