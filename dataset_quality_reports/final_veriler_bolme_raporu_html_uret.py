@@ -27,8 +27,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from veri_bol import gruplari_kur
-from aciklama_uretim_core import _dedup_normalize
+from faz_c.veri_bol import gruplari_kur
+from faz_b.aciklama_uretim_core import _dedup_normalize
 
 RAPOR_JSON = Path("data/final_veriler/bolme_raporu.json")
 HTML_YOLU = Path("docs/raporlar/bolme_raporu.html")

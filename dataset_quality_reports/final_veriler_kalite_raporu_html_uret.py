@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from aciklama_uretim_core import KATEGORILER, distinct_n, _dedup_normalize, ihlalleri_bul
+from faz_b.aciklama_uretim_core import KATEGORILER, distinct_n, _dedup_normalize, ihlalleri_bul
 
 FINAL_DIZIN = Path("data/final_veriler")
 HTML_YOLU = Path("docs/raporlar/kalite_raporu.html")

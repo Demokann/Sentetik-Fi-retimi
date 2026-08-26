@@ -37,10 +37,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
-from schema import Fatura
-from validators import fatura_dogrula, kural_ihlali_turlerini_tespit_et, tarih_gelecekte_mi
-from main import fatura_to_dict
-from cift_grup import cift_grup_anahtari, kayit_imzasi
+from ortak.schema import Fatura
+from ortak.validators import fatura_dogrula, kural_ihlali_turlerini_tespit_et, tarih_gelecekte_mi
+from faz_a.main import fatura_to_dict
+from ortak.cift_grup import cift_grup_anahtari, kayit_imzasi
 
 app = FastAPI(title="Validation API", description="Fiş anomali tespit servisi", version="1.0.0")
 

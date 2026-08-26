@@ -37,8 +37,8 @@ tespit edip etiketler.
 ![Faz A](docs/diagrams/faz-a.png)
 
 ```bash
-python main.py --count 120000 --anomali-orani 0.25 --output-dir data --filename faturalar
-python rapor_analiz.py --output-dir data --filename faturalar   # üretim sonrası teşhis
+python -m faz_a.main --count 120000 --anomali-orani 0.25 --output-dir data --filename faturalar
+python -m faz_a.rapor_analiz --output-dir data --filename faturalar   # üretim sonrası teşhis
 ```
 
 | parametre | açıklama |
@@ -66,8 +66,8 @@ OpenStreetMap'ten çekilmiş gerçek işletme adlarını, sentetik dolguyu ve ş
 şirketi havuzunu harmanlar. Bir kez üretilir:
 
 ```bash
-python firma_adlari_osm_cek.py --yeniden --hedef 3000 --bekleme 10
-python firma_registry_olustur.py --hedef-per-iskolu 1500 --osm-pay 0.8 --seed 42
+python -m faz_a.firma_adlari_osm_cek --yeniden --hedef 3000 --bekleme 10
+python -m faz_a.firma_registry_olustur --hedef-per-iskolu 1500 --osm-pay 0.8 --seed 42
 ```
 
 ---
@@ -89,16 +89,16 @@ atanmıştır ve model o kategoriye sadık bir metin yazmak zorundadır.
 
 ```bash
 # 1. Dengeli alt küme seç ve batch'lere böl
-python batch_hazirla.py --toplam 25000 --batch-size 1000 \
+python -m faz_b.batch_hazirla --toplam 25000 --batch-size 1000 \
     --tur-taban 400 --tur-tavan 600 --cikti-dizini data/aciklama_25k
 
 # 2. Üret (kesintiye dayanıklı; aynı komut kaldığı yerden devam eder)
-python aciklama_toplu_uret.py --cikti-dizini data/aciklama_25k \
+python -m faz_b.aciklama_toplu_uret --cikti-dizini data/aciklama_25k \
     --saglayici ollama --workers 2 --ilerleme 1000
 
 # 3. Derle
-python aciklama_birlestir.py --cikti-dizini data/aciklama_25k --sadece-uretilenler
-python onay_durumu_ata.py    --cikti-dizini data/aciklama_25k
+python -m faz_b.aciklama_birlestir --cikti-dizini data/aciklama_25k --sadece-uretilenler
+python -m faz_b.onay_durumu_ata    --cikti-dizini data/aciklama_25k
 ```
 
 Alt küme seçimi **rastgele değildir**: bazı anomali türleri havuzda birkaç yüz
@@ -121,7 +121,7 @@ Faz A biter bitmez çalıştırılabilir.
 ![Faz C](docs/diagrams/faz-c.png)
 
 ```bash
-python fis_uret.py --input-json data/faturalar.json --output-dir data/fisler
+python -m faz_c.fis_uret --input-json data/faturalar.json --output-dir data/fisler
 ```
 
 İki farklı şablon (yazarkasa fişi ve e-arşiv fatura) arasında, faturanın
