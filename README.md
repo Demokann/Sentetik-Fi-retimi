@@ -1,7 +1,7 @@
 # masrafAI — Sentetik Masraf Fişi ve Sahtecilik Veri Seti Üretimi
 
 Masraf ve fatura sahteciliği tespiti için **sentetik Türkçe veri seti** üreten
-bir araç zinciri. Gerçek veriye erişim gerektirmeden; gerçekçi fişler, bu
+bir araç zinciri. Sentetik fişleri, bu
 fişlere çalışanın yazdığı açıklama metinleri ve bunların doğru etiketlerini
 birlikte üretir.
 
